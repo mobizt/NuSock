@@ -131,9 +131,11 @@ private:
         int ret = esp_tls_conn_read(sc->tls, sc->tmpBuf, sizeof(sc->tmpBuf));
         if (ret > 0)
         {
-            Serial.print("[DEBUG] Read ");
+#if defined(NUSOCK_DEBUG)
+            Serial.print("[WSS Debug] Read ");
             Serial.print(ret);
             Serial.println(" bytes from SSL connection");
+#endif
 
             // Copy to RX buffer
             for (int i = 0; i < ret && c->rxLen < MAX_WS_BUFFER; i++)
@@ -417,7 +419,9 @@ public:
         _serverSock = socket(AF_INET, SOCK_STREAM, 0);
         if (_serverSock < 0)
         {
-            Serial.println("Failed to create socket");
+#if defined(NUSOCK_DEBUG)
+            Serial.println("[WSS Debug] Failed to create socket");
+#endif
             return false;
         }
 
@@ -437,7 +441,9 @@ public:
 
         if (bind(_serverSock, (struct sockaddr *)&addr, sizeof(addr)) < 0)
         {
-            Serial.println("Failed to bind socket");
+#if defined(NUSOCK_DEBUG)
+            Serial.println("[WSS Debug] Failed to bind socket");
+#endif
             close(_serverSock);
             _serverSock = -1;
             return false;
@@ -446,7 +452,9 @@ public:
         // Listen
         if (listen(_serverSock, 5) < 0)
         {
-            Serial.println("Failed to listen on socket");
+#if defined(NUSOCK_DEBUG)
+            Serial.println("[WSS Debug] Failed to listen on socket");
+#endif
             close(_serverSock);
             _serverSock = -1;
             return false;
@@ -483,12 +491,16 @@ public:
             esp_tls_t *tls = esp_tls_init();
             if (tls)
             {
-                Serial.println("[WSS] Starting SSL Handshake...");
+#if defined(NUSOCK_DEBUG)
+                Serial.println("[WSS Debug] Starting SSL Handshake...");
+#endif
                 int ret = esp_tls_server_session_create(&_tlsCfg, clientSock, tls);
 
                 if (ret == 0)
                 {
-                    Serial.println("[WSS] SSL Handshake Success! Switching to Non-Blocking.");
+#if defined(NUSOCK_DEBUG)
+                    Serial.println("[WSS Debug] SSL Handshake Success! Switching to Non-Blocking.");
+#endif
 
                     // NOW set to Non-Blocking for normal data usage
                     int flags = fcntl(clientSock, F_GETFL, 0);
@@ -514,14 +526,18 @@ public:
                 }
                 else
                 {
-                    Serial.printf("[WSS] SSL Handshake Failed! Error: -0x%x\n", -ret);
+#if defined(NUSOCK_DEBUG)
+                    Serial.printf("[WSS Debug] SSL Handshake Failed! Error: -0x%x\n", -ret);
+#endif
                     esp_tls_server_session_delete(tls);
                     close(clientSock);
                 }
             }
             else
             {
-                Serial.println("[WSS] Failed to init TLS");
+#if defined(NUSOCK_DEBUG)
+                Serial.println("[WSS Debug] Failed to init TLS");
+#endif
                 close(clientSock);
             }
 

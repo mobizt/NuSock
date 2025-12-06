@@ -134,6 +134,9 @@ private:
             }
             else
             {
+#if defined(NUSOCK_DEBUG)
+                Serial.println("[WS Debug] Error: Write Error");
+#endif
                 if (s->_onEvent)
                     s->_onEvent(c, SERVER_EVENT_ERROR, (const uint8_t *)"Write Error", 11);
                 c->last_event = SERVER_EVENT_ERROR;
@@ -167,6 +170,9 @@ private:
             }
             else if (payloadLen == 127)
             {
+#if defined(NUSOCK_DEBUG)
+                Serial.println("[WS Debug] Error: Frame Too Large");
+#endif
                 if (_onEvent)
                     _onEvent(c, SERVER_EVENT_ERROR, (const uint8_t *)"Frame Too Large", 15);
                 c->last_event = SERVER_EVENT_ERROR;
@@ -294,6 +300,9 @@ private:
                     }
                     else
                     {
+#if defined(NUSOCK_DEBUG)
+                        Serial.println("[WS Debug] Error: Invalid Handshake");
+#endif
                         if (s->_onEvent)
                             s->_onEvent(c, SERVER_EVENT_ERROR, (const uint8_t *)"Invalid Handshake", 17);
                         c->last_event = SERVER_EVENT_ERROR;
@@ -413,6 +422,9 @@ private:
                     }
                     else
                     {
+#if defined(NUSOCK_DEBUG)
+                        Serial.println("[WS Debug] Error: Invalid Handshake");
+#endif
                         if (_onEvent)
                             _onEvent(c, SERVER_EVENT_ERROR, (const uint8_t *)"Invalid Handshake", 17);
                         c->last_event = SERVER_EVENT_ERROR;
@@ -658,6 +670,9 @@ public:
             }
             else
             {
+#if defined(NUSOCK_DEBUG)
+                Serial.println("[WS Debug] Error: Alloc Failed");
+#endif
                 if (_onEvent)
                     _onEvent(c, SERVER_EVENT_ERROR, (const uint8_t *)"Alloc Failed", 12);
                 delete c;

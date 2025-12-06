@@ -203,6 +203,9 @@ private:
                 {
                     if (_onEvent)
                     {
+#if defined(NUSOCK_DEBUG)
+                        Serial.println("[WS Debug] Error: Bad Status");
+#endif
                         char errBuf[128];
                         snprintf(errBuf, sizeof(errBuf), "Bad Status: %s", lineBuf);
                         _onEvent(_internalClient, CLIENT_EVENT_ERROR, (const uint8_t *)errBuf, strlen(errBuf));
@@ -238,6 +241,9 @@ private:
                 }
                 else
                 {
+#if defined(NUSOCK_DEBUG)
+                    Serial.println("[WS Debug] Error: Missing Headers");
+#endif
                     if (_onEvent)
                         _onEvent(_internalClient, CLIENT_EVENT_ERROR, (const uint8_t *)"Missing Headers", 15);
                     stop();
@@ -377,7 +383,7 @@ public:
             if (_internalClient)
                 stop(); // Cleanup previous if any
 
-            _internalClient = new NuClient((NuSockServer*)nullptr, c, false /* false for pointer to external client */);
+            _internalClient = new NuClient((NuSockServer *)nullptr, c, false /* false for pointer to external client */);
             strncpy(_internalClient->id, "SERVER", sizeof(_internalClient->id));
             _internalClient->state = NuClient::STATE_HANDSHAKE;
 

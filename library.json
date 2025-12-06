@@ -1,7 +1,7 @@
 {
     "name": "NuSock",
-    "version": "1.0.1",
-    "description": "A lightweight WebSocket Server and Client library supporting WSS (Secure WebSockets) on ESP32. Features dual-mode operation (Generic Polling vs Native LwIP) and event-driven messaging.",
+    "version": "1.0.2",
+    "description": "A lightweight WebSocket Server and Client library supporting WSS (Secure WebSockets) on ESP32/ESP8266/RP2040. Features dual-mode operation (Generic Polling vs Native LwIP) and event-driven messaging.",
     "keywords": [
       "websocket",
       "wss",

@@ -1,0 +1,138 @@
+/**
+ * SPDX-FileCopyrightText: 2025 Suwatchai K. <suwatchai@outlook.com>
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+#ifndef NUSOCK_TYPES_H
+#define NUSOCK_TYPES_H
+
+#include "NuSockConfig.h"
+#include <cstring>
+#include <cstdlib>
+
+// Forward declarations
+class NuSockServer;
+class NuSockServerSecure;
+
+enum NuServerEvent
+{
+    SERVER_EVENT_UBDEFINED,
+    SERVER_EVENT_CONNECT,             // Server Started / Network Connected
+    SERVER_EVENT_DISCONNECTED,        // Server Stopped / Network Disconnected
+    SERVER_EVENT_CLIENT_HANDSHAKE,    // Handshake Request Received
+    SERVER_EVENT_CLIENT_CONNECTED,    // Handshake Successful (WebSocket Open)
+    SERVER_EVENT_CLIENT_DISCONNECTED, // Client Closed
+    SERVER_EVENT_MESSAGE_TEXT,        // Text Frame
+    SERVER_EVENT_MESSAGE_BINARY,      // Binary Frame
+    SERVER_EVENT_ERROR                // Error
+};
+
+enum NuClientEvent
+{
+    CLIENT_EVENT_HANDSHAKE,
+    CLIENT_EVENT_CONNECTED,
+    CLIENT_EVENT_DISCONNECTED,
+    CLIENT_EVENT_MESSAGE_TEXT,
+    CLIENT_EVENT_MESSAGE_BINARY,
+    CLIENT_EVENT_ERROR
+};
+
+struct NuClient
+{
+    // Changed to void* to support both NuSockServer and NuSockServerSecure
+    void *server; 
+    bool isSecure; // Flag to identify which server type is being used
+
+#ifdef NUSOCK_USE_LWIP
+    struct tcp_pcb *pcb;
+#else
+    Client *client;
+    bool isConnected;
+    bool ownsClient; // Flag to track ownership
+#endif
+
+    char id[32];
+
+    // RX Buffer (Dynamic)
+    uint8_t *rxBuffer;
+    size_t rxLen;
+
+    // TX Buffer (Dynamic Manual)
+    uint8_t *txBuffer;
+    size_t txLen;
+    size_t txCap;
+
+    enum State
+    {
+        STATE_SSL_HANDSHAKE, // New state for Non-Blocking TLS
+        STATE_HANDSHAKE,
+        STATE_CONNECTED
+    };
+    State state;
+    
+    int8_t index = -1; // default index
+    NuServerEvent last_event = SERVER_EVENT_UBDEFINED;
+
+#ifdef NUSOCK_USE_LWIP
+    template <typename Server>
+    NuClient(Server *s, struct tcp_pcb *p) 
+        : server((void*)s), isSecure(false), pcb(p), rxLen(0), txLen(0), txCap(0), state(STATE_HANDSHAKE)
+    {
+        rxBuffer = (uint8_t *)malloc(MAX_WS_BUFFER);
+        txBuffer = nullptr;
+        id[0] = 0;
+    }
+#else
+    // Generic Constructor
+    template <typename Server>
+    NuClient(Server *s, Client *c, bool owns = true) 
+        : server((void*)s), isSecure(false), client(c), isConnected(true), ownsClient(owns), rxLen(0), txLen(0), txCap(0), state(STATE_HANDSHAKE)
+    {
+        rxBuffer = (uint8_t *)malloc(MAX_WS_BUFFER);
+        txBuffer = nullptr;
+        id[0] = 0;
+    }
+#endif
+
+    ~NuClient()
+    {
+        if (rxBuffer)
+            free(rxBuffer);
+        rxBuffer = nullptr;
+        if (txBuffer)
+            free(txBuffer);
+        txBuffer = nullptr;
+#ifndef NUSOCK_USE_LWIP
+        if (client)
+        {
+            client->stop();
+            if (ownsClient)
+            {
+                delete client;
+            }
+        }
+#endif
+    }
+
+    void appendTx(uint8_t b)
+    {
+        if (txLen >= txCap)
+        {
+            size_t newCap = (txCap == 0) ? 64 : txCap * 2;
+            uint8_t *newBuf = (uint8_t *)realloc(txBuffer, newCap);
+            if (!newBuf)
+                return;
+            txBuffer = newBuf;
+            txCap = newCap;
+        }
+        txBuffer[txLen++] = b;
+    }
+
+    void clearTx()
+    {
+        txLen = 0;
+    }
+};
+
+#endif

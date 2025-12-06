@@ -1,0 +1,123 @@
+/**
+ * NuSock Secure WebSocket Client (WSS) ESP32/ESP8266 devices Example
+ * This sketch demonstrates how to run a Secure WebSocket Client (WSD) on port 443
+ * using the NuSock library
+ */
+
+#include <Arduino.h>
+
+#if defined(ESP32)
+#include <WiFi.h>
+#elif defined(ESP8266)
+#include <ESP8266WiFi.h>
+#endif
+
+#include "NuSock.h"
+#include <WiFiClientSecure.h> // For ESP32/ESP8266/Raspberry Pi Pico W
+
+// Network Credentials
+const char *ssid = "YOUR_SSID";
+const char *password = "YOUR_PASS";
+
+WiFiClientSecure wifiClient; // or WiFiSSLClient
+NuSockClient wsClient;
+
+// Event Handler Callback
+void onWebSocketEvent(NuClient *client, NuClientEvent event, const uint8_t *payload, size_t len)
+{
+    switch (event)
+    {
+    case CLIENT_EVENT_HANDSHAKE:
+        Serial.println("[WS] Handshake completed!");
+        break;
+
+    case CLIENT_EVENT_CONNECTED:
+        Serial.println("[WS] Connected to server!");
+        // Send a message immediately upon connection
+        wsClient.send("Hello from WS Client");
+        break;
+
+    case CLIENT_EVENT_DISCONNECTED:
+        Serial.println("[WS] Disconnected!");
+        break;
+
+    case CLIENT_EVENT_MESSAGE_TEXT:
+        Serial.print("[WS] Text: ");
+        for (size_t i = 0; i < len; i++)
+            Serial.print((char)payload[i]);
+        Serial.println();
+        break;
+
+    case CLIENT_EVENT_MESSAGE_BINARY:
+        Serial.println("[WS] Binary: ");
+        Serial.print("bytes: ");
+        Serial.println(len);
+        break;
+
+    case CLIENT_EVENT_ERROR:
+        Serial.print("[WS] Error: ");
+        if (payload)
+            Serial.println((const char *)payload);
+        else
+            Serial.println("Unknown");
+        break;
+    }
+}
+
+void setup()
+{
+
+    Serial.begin(115200);
+    delay(3000); // Wait for serial monitor
+
+    // Connect to WiFi
+    Serial.print("Connecting to WiFi");
+    WiFi.begin(ssid, password);
+
+    while (WiFi.status() != WL_CONNECTED)
+    {
+        delay(200);
+        Serial.print(".");
+    }
+
+    Serial.println(" ✓ Connected!");
+    Serial.print("IP Address: ");
+    Serial.println(WiFi.localIP());
+
+    // If no SSL certificate verification
+    wifiClient.setInsecure();
+
+    // Register Event Callback
+    wsClient.onEvent(onWebSocketEvent);
+
+    // Configure WebSocket Client
+    wsClient.begin(&wifiClient, "echo.websocket.org", 443, "/");
+
+    // Initiate Connection
+    Serial.println("Connecting to WebSocket Server...");
+    if (wsClient.connect())
+    {
+        Serial.println("Connection request sent.");
+    }
+    else
+    {
+        Serial.println("Connection failed immediately.");
+    }
+}
+
+void loop()
+{
+    // Drive the Network Stack
+    // Must be called frequently to process incoming data and events
+    wsClient.loop();
+
+    // Example: Send periodic heartbeat
+    static unsigned long lastTime = 0;
+    if (millis() - lastTime > 5000)
+    {
+        lastTime = millis();
+        // Only send if connected logic would go here,
+        // currently NuSockClient handles state internally and won't send if disconnected
+        wsClient.send("Heartbeat");
+    }
+}

@@ -1,0 +1,43 @@
+{
+    "name": "NuSock",
+    "version": "1.0.0",
+    "description": "A lightweight WebSocket Server and Client library supporting WSS (Secure WebSockets) on ESP32. Features dual-mode operation (Generic Polling vs Native LwIP) and event-driven messaging.",
+    "keywords": [
+      "websocket",
+      "wss",
+      "server",
+      "client",
+      "esp32",
+      "esp8266",
+      "rp2040",
+      "ssl",
+      "tls",
+      "networking"
+    ],
+    "repository": {
+      "type": "git",
+      "url": "https://github.com/Suwatchai/NuSock.git"
+    },
+    "authors": [
+      {
+        "name": "Suwatchai K.",
+        "email": "suwatchai@outlook.com",
+        "maintainer": true
+      }
+    ],
+    "license": "MIT",
+    "frameworks": [
+      "arduino"
+    ],
+    "platforms": [
+      "espressif32",
+      "espressif8266",
+      "ststm32",
+      "raspberrypi",
+      "atmelavr",
+      "atmelsam"
+    ],
+    "headers": [
+      "NuSock.h"
+    ]
+  }

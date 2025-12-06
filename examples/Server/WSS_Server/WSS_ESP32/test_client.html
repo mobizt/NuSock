@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>NuSock Chat</title>
+    <style>
+        body { font-family: sans-serif; padding: 20px; max-width: 600px; margin: 0 auto; }
+        #log { border: 1px solid #ccc; height: 300px; overflow-y: scroll; padding: 10px; background: #f9f9f9; margin-bottom: 10px; }
+        .control-panel { background: #eee; padding: 15px; border-radius: 5px; }
+        input[type="text"] { padding: 5px; margin: 5px 0; width: 100%; box-sizing: border-box; }
+        button { padding: 8px 15px; cursor: pointer; background: #007bff; color: white; border: none; border-radius: 3px; }
+        button:hover { background: #0056b3; }
+        button.disconnect { background: #dc3545; }
+        button.disconnect:hover { background: #a71d2a; }
+        
+        .error-banner {
+            background-color: #ffe6e6; color: #d8000c; border: 1px solid #d8000c;
+            padding: 15px; margin-bottom: 20px; border-radius: 4px; display: none;
+        }
+    </style>
+</head>
+<body>
+
+    <h2>NuSock Multi-Client Chat</h2>
+
+    <div id="https-warning" class="error-banner">
+        <strong>Security Warning:</strong> Page loaded over HTTPS. Secure browsers will likely block access to your local ESP32 (ws://).<br>
+        Please save this file to your computer and open it locally.
+    </div>
+    
+    <div class="control-panel">
+        <label><strong>1. Setup</strong></label>
+        <input type="text" id="ip" placeholder="ESP32 IP (e.g. 192.168.1.100)" value="192.168.1.100" />
+        <input type="text" id="username" placeholder="Enter Username (Required)" value="User1" />
+        
+        <div style="margin-top: 5px;">
+            <button onclick="connect()">Connect & Login</button>
+            <button class="disconnect" onclick="disconnect()">Disconnect</button>
+        </div>
+        
+        <hr style="border: 0; border-top: 1px solid #ccc; margin: 15px 0;">
+        
+        <label><strong>2. Chat</strong></label>
+        <input type="text" id="msg" placeholder="Type a message..." onkeydown="if(event.key==='Enter') sendMsg()" />
+        <button onclick="sendMsg()">Send Text</button>
+        <button onclick="sendBinary()" style="background-color: #6c757d;">Send Binary (0xAABBCC)</button>
+    </div>
+    
+    <h3>Chat Log</h3>
+    <div id="log"></div>
+
+<script>
+    var ws;
+
+    if (window.location.protocol === 'https:') {
+        document.getElementById('https-warning').style.display = 'block';
+    }
+
+    function connect() {
+        var ip = document.getElementById("ip").value;
+        var user = document.getElementById("username").value;
+
+        if(!user) {
+            alert("Please enter a username first!");
+            return;
+        }
+
+        if(ws) ws.close();
+
+        try {
+            log("Connecting to wss://" + ip + "/ ...", "gray");
+            ws = new WebSocket("wss://" + ip + "/");
+            ws.binaryType = "arraybuffer"; // Important for handling binary
+
+            ws.onopen = function() {
+                log("Connected! Sending username: " + user, "black");
+                
+                // --- CRITICAL STEP: SEND USERNAME FIRST ---
+                ws.send(user); 
+            };
+
+            ws.onmessage = function(event) {
+                if (event.data instanceof ArrayBuffer) {
+                    // Handle Binary Data
+                    var bytes = new Uint8Array(event.data);
+                    var hex = Array.from(bytes).map(b => b.toString(16).padStart(2,'0')).join(' ');
+                    log("RX Binary [" + bytes.length + " bytes]: " + hex.toUpperCase(), "purple");
+                } else {
+                    // Handle Text Data
+                    log(event.data, "green");
+                }
+            };
+
+            ws.onclose = function(e) {
+                log("Disconnected", "red");
+            };
+            
+            ws.onerror = function(e) {
+                log("Connection Error", "red");
+            };
+        } catch (err) {
+            log("Error: " + err.message, "red");
+        }
+    }
+    
+    function disconnect() {
+        if(ws) ws.close();
+    }
+
+    function sendMsg() {
+        var input = document.getElementById("msg");
+        
+        if(ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(input.value);
+            log("Me: " + input.value, "blue"); 
+            input.value = "";
+        } else {
+            log("Not connected", "red");
+        }
+    }
+
+    function sendBinary() {
+        if(ws && ws.readyState === WebSocket.OPEN) {
+            // Create a sample byte array [0xAA, 0xBB, 0xCC, 0xDD]
+            var buffer = new Uint8Array([0xAA, 0xBB, 0xCC, 0xDD]);
+            ws.send(buffer);
+            log("Me (Binary): AA BB CC DD", "blue");
+        } else {
+            log("Not connected", "red");
+        }
+    }
+
+    function log(msg, color) {
+        var box = document.getElementById("log");
+        var time = new Date().toLocaleTimeString();
+        box.innerHTML += `<div style="color:${color}"><small>[${time}]</small> ${msg}</div>`;
+        box.scrollTop = box.scrollHeight;
+    }
+</script>
+
+</body>
+</html>

@@ -1,0 +1,47 @@
+#######################################
+# Syntax Coloring Map for NuSock
+#######################################
+
+#######################################
+# Datatypes (KEYWORD1)
+#######################################
+NuSockServer	KEYWORD1
+NuSockClient	KEYWORD1
+NuSockServerSecure	KEYWORD1
+NuClient	KEYWORD1
+
+#######################################
+# Methods and Functions (KEYWORD2)
+#######################################
+begin	KEYWORD2
+connect	KEYWORD2
+loop	KEYWORD2
+onEvent	KEYWORD2
+send	KEYWORD2
+stop	KEYWORD2
+clientCount	KEYWORD2
+
+#######################################
+# Constants and Enums (LITERAL1)
+#######################################
+NuServerEvent	LITERAL1
+SERVER_EVENT_UBDEFINED	LITERAL1
+SERVER_EVENT_CONNECT	LITERAL1
+SERVER_EVENT_DISCONNECTED	LITERAL1
+SERVER_EVENT_CLIENT_HANDSHAKE	LITERAL1
+SERVER_EVENT_CLIENT_CONNECTED	LITERAL1
+SERVER_EVENT_CLIENT_DISCONNECTED	LITERAL1
+SERVER_EVENT_MESSAGE_TEXT	LITERAL1
+SERVER_EVENT_MESSAGE_BINARY	LITERAL1
+SERVER_EVENT_ERROR	LITERAL1
+
+NuClientEvent	LITERAL1
+CLIENT_EVENT_HANDSHAKE	LITERAL1
+CLIENT_EVENT_CONNECTED	LITERAL1
+CLIENT_EVENT_DISCONNECTED	LITERAL1
+CLIENT_EVENT_MESSAGE_TEXT	LITERAL1
+CLIENT_EVENT_MESSAGE_BINARY	LITERAL1
+CLIENT_EVENT_ERROR	LITERAL1
+
+NUSOCK_SERVER_USE_LWIP	LITERAL1
+NUSOCK_USE_SERVER_SECURE	LITERAL1

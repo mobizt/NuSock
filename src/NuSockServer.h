@@ -11,9 +11,7 @@
 #include "NuSockUtils.h"
 #include "NuSockTypes.h"
 #include "vector/dynamic/DynamicVector.h"
-#include <cstring>
-#include <cstdio>
-#include <cstdlib>
+
 
 // Callback Signature (uses client->index inside NuClient)
 typedef void (*NuServerEventCallback)(NuClient *client, NuServerEvent event, const uint8_t *payload, size_t len);
@@ -528,7 +526,7 @@ public:
 
     /**
      * @brief Destroy the Nu Sock Server object.
-     * * Stops the server and disconnects all clients.
+     * Stops the server and disconnects all clients.
      */
     ~NuSockServer()
     {
@@ -537,7 +535,7 @@ public:
 
     /**
      * @brief Stop the server.
-     * * Disconnects all connected clients, frees their resources, stops the listener,
+     * Disconnects all connected clients, frees their resources, stops the listener,
      * and fires the SERVER_EVENT_DISCONNECTED event.
      */
     void stop()
@@ -593,7 +591,7 @@ public:
 #ifdef NUSOCK_USE_LWIP
     /**
      * @brief Start the WebSocket Server (LwIP Mode).
-     * * @param port The port to listen on (e.g., 80 or 8080).
+     * @param port The port to listen on (e.g., 80 or 8080).
      */
     void begin(uint16_t port)
     {
@@ -610,8 +608,8 @@ public:
 #else
     /**
      * @brief Start the WebSocket Server (Generic Mode).
-     * * Wraps a standard Arduino Server object (e.g., WiFiServer).
-     * * @tparam ServerType The class type of the underlying server.
+     * Wraps a standard Arduino Server object (e.g., WiFiServer).
+     * @tparam ServerType The class type of the underlying server.
      * @param server Pointer to the underlying Arduino Server instance.
      * @param port The port the server is listening on.
      */
@@ -648,7 +646,7 @@ public:
 
     /**
      * @brief Main processing loop.
-     * * MUST be called frequently in the main Arduino loop() when using Generic Mode.
+     * MUST be called frequently in the main Arduino loop() when using Generic Mode.
      * Accepts new clients and processes data for existing clients.
      */
     void loop()
@@ -701,13 +699,13 @@ public:
 
     /**
      * @brief Register a callback function for server events.
-     * * @param cb Function pointer matching the NuServerEventCallback signature.
+     * @param cb Function pointer matching the NuServerEventCallback signature.
      */
     void onEvent(NuServerEventCallback cb) { _onEvent = cb; }
 
     /**
      * @brief Broadcast a text message to ALL connected clients.
-     * * @param msg Null-terminated string to broadcast.
+     * @param msg Null-terminated string to broadcast.
      */
     void send(const char *msg)
     {
@@ -728,7 +726,7 @@ public:
 
     /**
      * @brief Broadcast a binary message to ALL connected clients.
-     * * @param data Pointer to the data buffer.
+     * @param data Pointer to the data buffer.
      * @param len Length of the data to broadcast.
      */
     void send(const uint8_t *data, size_t len)
@@ -749,7 +747,7 @@ public:
 
     /**
      * @brief Send a text message to a specific client by internal index.
-     * * @param index The index of the client in the internal list.
+     * @param index The index of the client in the internal list.
      * @param msg Null-terminated string to send.
      */
     void send(int index, const char *msg)
@@ -773,7 +771,7 @@ public:
 
     /**
      * @brief Send a binary message to a specific client by internal index.
-     * * @param index The index of the client in the internal list.
+     * @param index The index of the client in the internal list.
      * @param data Pointer to the data buffer.
      * @param len Length of the data to send.
      */
@@ -796,8 +794,8 @@ public:
 
     /**
      * @brief Send a text message to a specific client by Client ID.
-     * * The ID is usually assigned by the user logic or extracted from the handshake.
-     * * @param targetId The ID string to match.
+     * The ID is usually assigned by the user logic or extracted from the handshake.
+     * @param targetId The ID string to match.
      * @param msg Null-terminated string to send.
      */
     void send(const char *targetId, const char *msg)
@@ -820,7 +818,7 @@ public:
 
     /**
      * @brief Send a binary message to a specific client by Client ID.
-     * * @param targetId The ID string to match.
+     * @param targetId The ID string to match.
      * @param data Pointer to the data buffer.
      * @param len Length of the data to send.
      */
@@ -843,7 +841,7 @@ public:
 
     /**
      * @brief Get the number of currently connected clients.
-     * * @return size_t Number of active connections.
+     * @return size_t Number of active connections.
      */
     size_t clientCount()
     {

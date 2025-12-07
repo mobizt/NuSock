@@ -13,7 +13,6 @@
 // SSL/TLS Support for ESP32
 #if defined(ESP32)
 #include "NuSockServerSecure.h"
-// Future: Add NuSockClientSecure for WSS client connections
 #endif
 
 #endif

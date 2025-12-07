@@ -11,9 +11,6 @@
 #include "NuSockUtils.h"
 #include "NuSockTypes.h"
 #include "vector/dynamic/DynamicVector.h"
-#include <cstring>
-#include <cstdio>
-#include <cstdlib>
 
 // Event Callback Typedef
 typedef void (*NuClientEventCallback)(NuClient *client, NuClientEvent event, const uint8_t *payload, size_t len);
@@ -207,7 +204,7 @@ private:
                         Serial.println("[WS Debug] Error: Bad Status");
 #endif
                         char errBuf[128];
-                        snprintf(errBuf, sizeof(errBuf), "Bad Status: %s", lineBuf);
+                        snprintf(errBuf, sizeof(errBuf), "Bad Status: %.110s", lineBuf);
                         _onEvent(_internalClient, CLIENT_EVENT_ERROR, (const uint8_t *)errBuf, strlen(errBuf));
                     }
                     stop();
@@ -231,7 +228,7 @@ private:
                         isWebsocket = true;
                 }
 
-                if (isUpgrade)
+                if (isUpgrade && isWebsocket)
                 {
                     if (_onEvent)
                         _onEvent(_internalClient, CLIENT_EVENT_HANDSHAKE, nullptr, 0);
@@ -324,7 +321,7 @@ public:
 
     /**
      * @brief Destroy the Nu Sock Client object.
-     * * Stops the connection and frees resources.
+     * Stops the connection and frees resources.
      */
     ~NuSockClient()
     {
@@ -335,9 +332,9 @@ public:
 #ifndef NUSOCK_USE_LWIP
     /**
      * @brief Initialize the client parameters (Generic Mode).
-     * * This prepares the client for connection but does not connect immediately.
+     * This prepares the client for connection but does not connect immediately.
      * Call connect() after this.
-     * * @tparam ClientType The type of the underlying client (e.g., WiFiClient).
+     * @tparam ClientType The type of the underlying client (e.g., WiFiClient).
      * @param client Pointer to the underlying Arduino Client instance.
      * @param host The hostname or IP address of the WebSocket server.
      * @param port The port number of the WebSocket server.
@@ -367,8 +364,8 @@ public:
 
     /**
      * @brief Establish the WebSocket connection (Generic Mode).
-     * * Connects via TCP, sends the HTTP Upgrade headers, and validates the handshake.
-     * * @return true if the connection and handshake were successful.
+     * Connects via TCP, sends the HTTP Upgrade headers, and validates the handshake.
+     * @return true if the connection and handshake were successful.
      * @return false if the connection failed.
      */
     bool connect()
@@ -414,7 +411,7 @@ public:
 
     /**
      * @brief Stop the client and disconnect.
-     * * Gracefully closes the underlying TCP connection, fires the DISCONNECTED event,
+     * Gracefully closes the underlying TCP connection, fires the DISCONNECTED event,
      * and frees internal memory buffers.
      */
     void stop()
@@ -444,7 +441,7 @@ public:
 
     /**
      * @brief Main processing loop.
-     * * MUST be called frequently in the main Arduino loop().
+     * MUST be called frequently in the main Arduino loop().
      * Handles incoming data processing, keep-alives, and event triggering.
      */
     void loop()
@@ -459,13 +456,13 @@ public:
 
     /**
      * @brief Register a callback function for client events.
-     * * @param cb Function pointer matching the NuClientEventCallback signature.
+     * @param cb Function pointer matching the NuClientEventCallback signature.
      */
     void onEvent(NuClientEventCallback cb) { _onEvent = cb; }
 
     /**
      * @brief Send a text message to the server.
-     * * @param msg Null-terminated string to send.
+     * @param msg Null-terminated string to send.
      */
     void send(const char *msg)
     {
@@ -477,7 +474,7 @@ public:
 
     /**
      * @brief Send a binary message to the server.
-     * * @param data Pointer to the data buffer.
+     * @param data Pointer to the data buffer.
      * @param len Length of the data to send.
      */
     void send(const uint8_t *data, size_t len)

@@ -8,8 +8,6 @@
 #define NUSOCK_TYPES_H
 
 #include "NuSockConfig.h"
-#include <cstring>
-#include <cstdlib>
 
 // Forward declarations
 class NuSockServer;
@@ -41,7 +39,7 @@ enum NuClientEvent
 struct NuClient
 {
     // Changed to void* to support both NuSockServer and NuSockServerSecure
-    void *server; 
+    void *server;
     bool isSecure; // Flag to identify which server type is being used
 
 #ifdef NUSOCK_USE_LWIP
@@ -70,14 +68,14 @@ struct NuClient
         STATE_CONNECTED
     };
     State state;
-    
+
     int8_t index = -1; // default index
     NuServerEvent last_event = SERVER_EVENT_UBDEFINED;
 
 #ifdef NUSOCK_USE_LWIP
     template <typename Server>
-    NuClient(Server *s, struct tcp_pcb *p) 
-        : server((void*)s), isSecure(false), pcb(p), rxLen(0), txLen(0), txCap(0), state(STATE_HANDSHAKE)
+    NuClient(Server *s, struct tcp_pcb *p)
+        : server((void *)s), isSecure(false), pcb(p), rxLen(0), txLen(0), txCap(0), state(STATE_HANDSHAKE)
     {
         rxBuffer = (uint8_t *)malloc(MAX_WS_BUFFER);
         txBuffer = nullptr;
@@ -86,8 +84,8 @@ struct NuClient
 #else
     // Generic Constructor
     template <typename Server>
-    NuClient(Server *s, Client *c, bool owns = true) 
-        : server((void*)s), isSecure(false), client(c), isConnected(true), ownsClient(owns), rxLen(0), txLen(0), txCap(0), state(STATE_HANDSHAKE)
+    NuClient(Server *s, Client *c, bool owns = true)
+        : server((void *)s), isSecure(false), client(c), isConnected(true), ownsClient(owns), rxLen(0), txLen(0), txCap(0), state(STATE_HANDSHAKE)
     {
         rxBuffer = (uint8_t *)malloc(MAX_WS_BUFFER);
         txBuffer = nullptr;
@@ -109,7 +107,16 @@ struct NuClient
             client->stop();
             if (ownsClient)
             {
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdelete-non-virtual-dtor"
+#endif
+
                 delete client;
+
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
             }
         }
 #endif

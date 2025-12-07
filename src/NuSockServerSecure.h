@@ -333,7 +333,7 @@ public:
 
     /**
      * @brief Stop the Secure WebSocket Server.
-     * * Disconnects all clients, releases SSL contexts, closes the listening socket,
+     * Disconnects all clients, releases SSL contexts, closes the listening socket,
      * and fires the DISCONNECTED event.
      */
     void stop()
@@ -394,7 +394,7 @@ public:
 
     /**
      * @brief Start the Secure WebSocket Server.
-     * * @param port The port to listen on (usually 443 for WSS).
+     * @param port The port to listen on (usually 443 for WSS).
      * @param cert The server certificate in PEM format (null-terminated string).
      * @param key The server private key in PEM format (null-terminated string).
      * @return true if the server started successfully.
@@ -470,7 +470,7 @@ public:
 
     /**
      * @brief Main processing loop.
-     * * Accepts new connections, performs SSL handshakes, and processes incoming data.
+     * Accepts new connections, performs SSL handshakes, and processes incoming data.
      * MUST be called frequently in the main Arduino loop().
      */
     void loop()
@@ -566,13 +566,13 @@ public:
 
     /**
      * @brief Register a callback function for server events.
-     * * @param cb Function pointer to the event handler.
+     * @param cb Function pointer to the event handler.
      */
     void onEvent(NuServerSecureEventCallback cb) { _onEvent = cb; }
 
     /**
      * @brief Broadcast a text message to ALL connected clients.
-     * * @param msg Null-terminated string to send.
+     * @param msg Null-terminated string to send.
      */
     void send(const char *msg)
     {
@@ -589,7 +589,7 @@ public:
 
     /**
      * @brief Broadcast a binary message to ALL connected clients.
-     * * @param data Pointer to the data buffer.
+     * @param data Pointer to the data buffer.
      * @param len Length of the data.
      */
     void send(const uint8_t *data, size_t len)
@@ -606,7 +606,7 @@ public:
 
     /**
      * @brief Send a text message to a specific client.
-     * * @param index The client's internal index.
+     * @param index The client's internal index.
      * @param msg Null-terminated string to send.
      */
     void send(int index, const char *msg)
@@ -622,7 +622,7 @@ public:
 
     /**
      * @brief Send a binary message to a specific client.
-     * * @param index The client's internal index.
+     * @param index The client's internal index.
      * @param data Pointer to the data buffer.
      * @param len Length of the data.
      */
@@ -639,7 +639,7 @@ public:
 
     /**
      * @brief Get the number of currently active connections.
-     * * @return size_t Number of connected clients.
+     * @return size_t Number of connected clients.
      */
     size_t clientCount()
     {

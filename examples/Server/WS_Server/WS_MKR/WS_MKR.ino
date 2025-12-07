@@ -25,6 +25,10 @@
 
 // For Arduino MKR1000 WiFi
 // #include <WiFi101.h>
+
+// For UNO R4 WiFi
+// #include <WiFiS3.h>
+
 #include <NuSock.h>
 
 const char *ssid = "YOUR_SSID";

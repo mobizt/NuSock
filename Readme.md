@@ -40,10 +40,10 @@
 
 | Platform | Standard Server (WS) | Secure Server (WSS) | Secure Client (WSS) | LwIP Mode (Async) |
 | :--- | :---: | :---: | :---: | :---: |
-| **ESP32** | ✅ | ✅ (Native) | ✅ (Native) | ✅ |
-| **ESP8266** | ✅ | ✅ (Wrapper) | ✅ (Wrapper) | ✅ |
+| **ESP32** | ✅ | ✅ | ✅ | ✅ |
+| **ESP8266** | ✅ | ✅ | ✅ | ✅ |
 | **RP2040 (Pico W)** | ✅ | ✅ | ✅ | ❌ |
-| **STM32 / Renesas / AVR** | ✅ | ❌ | ✅ | ❌ |
+| **STM32 / Teensy / Renesas / AVR** | ✅ | ❌ | ✅ | ❌ |
 
 ---
 

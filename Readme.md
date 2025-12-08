@@ -38,7 +38,7 @@
 
 ## 📦 Supported Platforms
 
-| Platform | Standard Server (WS) | Secure Server (WSS) | Secure Client (WSS) | LwIP Mode (Async) |
+| Platform | WS Server | WSS Server | WSS Client | LwIP Mode (Async) |
 | :--- | :---: | :---: | :---: | :---: |
 | **ESP32** | ✅ | ✅ | ✅ | ✅ |
 | **ESP8266** | ✅ | ✅ | ✅ | ✅ |

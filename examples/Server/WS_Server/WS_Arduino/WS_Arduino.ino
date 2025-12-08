@@ -19,6 +19,9 @@
  * * =================================================================================
  */
 
+// For internal debug message printing
+#define NUSOCK_DEBUG
+
 #include <Arduino.h>
 // For Arduino MKR WiFi 1010, Nano 33 IoT, Arduino MKR VIDOR 4000, Arduino Uno WiFi Rev.2
 #include <WiFiNINA.h>
@@ -32,7 +35,9 @@
 #include <NuSock.h>
 
 const char *ssid = "YOUR_SSID";
-const char *pass = "YOUR_PASS";
+const char *password = "YOUR_PASS";
+
+// Use EthernetServer for STM32, Teensy and other Arduino boards.
 
 WiFiServer server(80); // External Server required for Generic Mode
 NuSockServer ws;
@@ -46,30 +51,22 @@ void onWebSocketEvent(NuClient *client, NuServerEvent event, const uint8_t *payl
         break;
 
     case SERVER_EVENT_CLIENT_HANDSHAKE:
-        Serial.print("[WS][");
-        Serial.print(client->index);
-        Serial.println("] Client sent handshake.");
+        NuSock::printf("[WS][%d] Client sent handshake.\n", client->index);
         break;
 
     case SERVER_EVENT_CLIENT_CONNECTED:
-        Serial.print("[WS][");
-        Serial.print(client->index);
-        Serial.println("] Client handshake successful - WS OPEN!");
+        NuSock::printf("[WS][%d] Client handshake successful - WS OPEN!\n", client->index);
         // Optionally send a welcome message
         ws.send(client->index, "Welcome!");
         break;
 
     case SERVER_EVENT_CLIENT_DISCONNECTED:
-        Serial.print("[WS][");
-        Serial.print(client->index);
-        Serial.println("] Client disconnected.");
+        NuSock::printf("[WS][%d] Client disconnected.\n", client->index);
         break;
 
     case SERVER_EVENT_MESSAGE_TEXT:
     {
-        Serial.print("[WS][");
-        Serial.print(client->index);
-        Serial.print("] Received Text: ");
+        NuSock::printf("[WS][%d] Received Text: ", client->index);
         for (size_t i = 0; i < len; i++)
             Serial.print((char)payload[i]);
         Serial.println();
@@ -85,25 +82,12 @@ void onWebSocketEvent(NuClient *client, NuServerEvent event, const uint8_t *payl
     break;
 
     case SERVER_EVENT_MESSAGE_BINARY:
-        Serial.print("[WS][");
-        Serial.print(client->index);
-        Serial.print("] Received Binary: ");
-        Serial.print(len);
-        Serial.println(" bytes");
+        NuSock::printf("[WS][%d] Received Binary: %d bytes\n", client->index, len);
         break;
 
     case SERVER_EVENT_ERROR:
-    {
-        Serial.print("[WS][");
-        Serial.print(client->index);
-        Serial.print("] ");
-        char *res = (char *)malloc(len + 1);
-        memcpy(res, payload, len);
-        res[len] = 0;
-        Serial.println(res);
-        free(res);
-    }
-    break;
+        NuSock::printf("[WS][%d] Error: %s\n", client->index, payload ? (const char *)payload : "Unknown");
+        break;
 
     default:
         break;
@@ -124,16 +108,9 @@ void setup()
         Serial.print(".");
     }
 
-    Serial.println(" ✓ Connected!");
+    Serial.println(" Connected!");
     Serial.print("IP Address: ");
-    IPAddress ip = WiFi.localIP();
-    Serial.print(ip[0]);
-    Serial.print(".");
-    Serial.print(ip[1]);
-    Serial.print(".");
-    Serial.print(ip[2]);
-    Serial.print(".");
-    Serial.println(ip[3]);
+    NuSock::printIP(WiFi.localIP());
 
     ws.onEvent(onWebSocketEvent);
 

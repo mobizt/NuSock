@@ -2,7 +2,24 @@
  * NuSock WebSocket Client (WS) ESP32/ESP8266 devices Example
  * This sketch demonstrates how to run a WebSocket Client (WS) on port 80
  * using the NuSock library
+ *
+ * For non-SSL WebSocket clients, using LwIP directly is recommended
+ * (NUSOCK_CLIENT_USE_LWIP).
+ *
+ * Most WebSocket servers reject connections via non-SSL ports (e.g., echo.websocket.org).
+ *
+ * For this reason, please run the WebSocket server on your PC by running
+ * the Python script 'simple_server.py', or by running 'run.bat' or 'run.sh'.
+ *
+ * To test the Python script WebSocket server,
+ * your PC should connect to the same network as your ESP32/ESP8266 devices.
  */
+
+// For internal debug message printing
+#define NUSOCK_DEBUG
+
+// For ESP32 and ESP8266 only.
+#define NUSOCK_CLIENT_USE_LWIP
 
 #include <Arduino.h>
 
@@ -18,8 +35,12 @@
 const char *ssid = "YOUR_SSID";
 const char *password = "YOUR_PASS";
 
+#ifdef NUSOCK_CLIENT_USE_LWIP
+NuSockClient ws; // LwIP manages the connection internally
+#else
 WiFiClient wifiClient;
-NuSockClient wsClient;
+NuSockClient ws;
+#endif
 
 // Event Handler Callback
 void onWebSocketEvent(NuClient *client, NuClientEvent event, const uint8_t *payload, size_t len)
@@ -33,7 +54,7 @@ void onWebSocketEvent(NuClient *client, NuClientEvent event, const uint8_t *payl
     case CLIENT_EVENT_CONNECTED:
         Serial.println("[WS] Connected to server!");
         // Send a message immediately upon connection
-        wsClient.send("Hello from WS Client");
+        ws.send("Hello from WS Client");
         break;
 
     case CLIENT_EVENT_DISCONNECTED:
@@ -48,17 +69,11 @@ void onWebSocketEvent(NuClient *client, NuClientEvent event, const uint8_t *payl
         break;
 
     case CLIENT_EVENT_MESSAGE_BINARY:
-        Serial.println("[WS] Binary: ");
-        Serial.print("bytes: ");
-        Serial.println(len);
+        NuSock::printf("[WS] Binary: %d bytes\n", len);
         break;
 
     case CLIENT_EVENT_ERROR:
-        Serial.print("[WS] Error: ");
-        if (payload)
-            Serial.println((const char *)payload);
-        else
-            Serial.println("Unknown");
+        NuSock::printf("[WS] Error: %s\n", payload ? (const char *)payload : "Unknown");
         break;
     }
 }
@@ -79,21 +94,23 @@ void setup()
         Serial.print(".");
     }
 
-    Serial.println(" ✓ Connected!");
+    Serial.println(" Connected!");
     Serial.print("IP Address: ");
-    Serial.println(WiFi.localIP());
+    NuSock::printIP(WiFi.localIP());
 
     // Register Event Callback
-    wsClient.onEvent(onWebSocketEvent);
+    ws.onEvent(onWebSocketEvent);
 
     // Configure WebSocket Client
-    // Using echo.websocket.org (standard testing server)
-    // Note: Use port 80 for WS, 443 for WSS (requires WiFiClientSecure)
-    wsClient.begin(&wifiClient, "echo.websocket.org", 80, "/");
+#ifdef NUSOCK_CLIENT_USE_LWIP
+    ws.begin("echo.websocket.org", 80, "/");
+#else
+    ws.begin(&wifiClient, "echo.websocket.org", 80, "/");
+#endif
 
     // Initiate Connection
     Serial.println("Connecting to WebSocket Server...");
-    if (wsClient.connect())
+    if (ws.connect())
     {
         Serial.println("Connection request sent.");
     }
@@ -107,7 +124,7 @@ void loop()
 {
     // Drive the Network Stack
     // Must be called frequently to process incoming data and events
-    wsClient.loop();
+    ws.loop();
 
     // Example: Send periodic heartbeat
     static unsigned long lastTime = 0;
@@ -116,6 +133,6 @@ void loop()
         lastTime = millis();
         // Only send if connected logic would go here,
         // currently NuSockClient handles state internally and won't send if disconnected
-        wsClient.send("Heartbeat");
+        ws.send("Heartbeat");
     }
 }

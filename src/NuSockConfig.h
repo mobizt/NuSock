@@ -10,7 +10,7 @@
 #include <Arduino.h>
 
 // We will force RP2040 to use Generic Mode (WiFiServer) to avoid 'tcpip_callback' errors.
-#if defined(NUSOCK_SERVER_USE_LWIP) && (defined(ESP32) || defined(ESP8266))
+#if (defined(NUSOCK_SERVER_USE_LWIP) || defined(NUSOCK_CLIENT_USE_LWIP)) && (defined(ESP32) || defined(ESP8266))
 #define NUSOCK_USE_LWIP
 #endif
 

@@ -3,8 +3,8 @@ import ssl
 import websockets
 
 # REPLACE WITH YOUR ESP32 IP
-ESP_IP = "192.168.0.x"
-URI = f"wss://{ESP_IP}:443"
+DEVICE_IP = "192.168.0.x"
+URI = f"wss://{DEVICE_IP}:443"
 
 async def test_connection():
     print(f"Attempting to connect to {URI}...")

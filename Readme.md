@@ -38,12 +38,12 @@
 
 ## 📦 Supported Platforms
 
-| Platform | WS Server | WSS Server | WSS Client | LwIP Mode (Async) |
-| :--- | :---: | :---: | :---: | :---: |
-| **ESP32** | ✅ | ✅ | ✅ | ✅ |
-| **ESP8266** | ✅ | ✅ | ✅ | ✅ |
-| **RP2040 (Pico W)** | ✅ | ✅ | ✅ | ❌ |
-| **STM32 / Teensy / Renesas / AVR** | ✅ | ❌ | ✅ | ❌ |
+| Platform | WS Server | WSS Server | WS Client | WSS Client | LwIP Mode (Async) |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| **ESP32** | ✅ | ✅ | ✅ | ✅ | ✅ |
+| **ESP8266** | ✅ | ✅ | ✅ | ✅ | ✅ |
+| **RP2040 (Pico W)** | ✅ | ✅ | ✅ | ✅ | ❌ |
+| **STM32 / Teensy / Renesas / AVR** | ✅ | ❌ | ✅ | ✅ | ❌ |
 
 ---
 

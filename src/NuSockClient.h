@@ -755,6 +755,19 @@ public:
 #endif
 
     /**
+     * @brief Check if the client is currently connected.
+     * @return true if connected to the server and handshake is complete.
+     */
+    bool connected()
+    {
+#ifdef NUSOCK_USE_LWIP
+        return (client_pcb != nullptr && _internalClient != nullptr && _internalClient->state == NuClient::STATE_CONNECTED);
+#else
+        return (_internalClient != nullptr && _internalClient->client != nullptr && _internalClient->client->connected() && _internalClient->state == NuClient::STATE_CONNECTED);
+#endif
+    }
+
+    /**
      * @brief Stop the client and disconnect.
      * Gracefully closes the underlying TCP connection, fires the DISCONNECTED event,
      * and frees internal memory buffers.

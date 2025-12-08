@@ -309,6 +309,15 @@ public:
     }
 
     /**
+     * @brief Check if the client is currently connected.
+     * @return true if connected to the server and handshake is complete.
+     */
+    bool connected()
+    {
+        return (_tls != nullptr && _internalClient != nullptr && _internalClient->state == NuClient::STATE_CONNECTED);
+    }
+
+    /**
      * @brief Main processing loop.
      * * Handles SSL data transmission and reception.
      * MUST be called frequently in the main Arduino loop().

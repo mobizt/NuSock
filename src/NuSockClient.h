@@ -802,6 +802,13 @@ public:
     }
 
     /**
+     * @brief Stop the client and disconnect.
+     * Gracefully closes the underlying TCP connection, fires the DISCONNECTED event,
+     * and frees internal memory buffers.
+     */
+    void disconnect() { stop(); }
+
+    /**
      * @brief Main processing loop.
      * MUST be called frequently in the main Arduino loop().
      * Handles incoming data processing, keep-alives, and event triggering.

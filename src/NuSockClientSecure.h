@@ -21,7 +21,7 @@ typedef void (*NuClientSecureEventCallback)(NuClient *client, NuClientEvent even
 
 /**
  * @brief Secure WebSocket Client (WSS) for ESP32 using native esp_tls.
- * * This class provides a lightweight, high-performance WSS client implementation
+ * This class provides a lightweight, high-performance WSS client implementation
  * that sits directly on top of the ESP-IDF esp_tls stack, avoiding the overhead
  * of the standard WiFiClientSecure.
  */
@@ -185,7 +185,7 @@ public:
 
     /**
      * @brief Set a custom Certificate Authority (CA) certificate.
-     * * If set, this certificate will be used for verification.
+     * If set, this certificate will be used for verification.
      * If NOT set (default), the global ESP32 certificate bundle (Mozilla root certs)
      * will be used, which works for most public websites.
      * * @param cert The CA certificate in PEM format (string).
@@ -203,7 +203,7 @@ public:
 
     /**
      * @brief Establish the Secure WebSocket connection (WSS).
-     * * Initiates the SSL handshake using esp_tls and performs the WebSocket Upgrade.
+     * Initiates the SSL handshake using esp_tls and performs the WebSocket Upgrade.
      * This function blocks during the initial handshake and then switches the
      * socket to non-blocking mode for the main loop.
      * * @return true if the SSL handshake and WebSocket upgrade were successful.
@@ -319,7 +319,7 @@ public:
 
     /**
      * @brief Main processing loop.
-     * * Handles SSL data transmission and reception.
+     * Handles SSL data transmission and reception.
      * MUST be called frequently in the main Arduino loop().
      * Checks for incoming data, processes WebSocket frames, and flushes outgoing data.
      */
@@ -421,6 +421,13 @@ public:
             _tls = nullptr;
         }
     }
+
+    /**
+     * @brief Stop the secure client and disconnect.
+     * Gracefully closes the SSL connection, fires the DISCONNECTED event,
+     * and frees internal memory buffers.
+     */
+    void disconnect() { stop(); }
 };
 
 #endif // ESP32

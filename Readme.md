@@ -1,10 +1,12 @@
 # NuSock
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
-![Platform](https://img.shields.io/badge/platform-Arduino%20%7C%20ESP32%20%7C%20ESP8266%20%7C%20RP2040-orange.svg)
-![Version](https://img.shields.io/badge/version-1.0.4-green.svg)
+![Platform](https://img.shields.io/badge/platform-ESP32%20%7C%20ESP8266%20%7C%20RP2040%20%7C%20SAMD%20%7C%20Renesas-orange.svg)
+![Version](https://img.shields.io/badge/version-1.0.5-green.svg)
 
 **NuSock** is a lightweight, high-performance WebSocket library designed for embedded systems. It bridges the gap between ease of use and raw performance by offering a **Dual-Mode Architecture** (Generic vs LwIP) and **Secure WebSocket (WSS)** support.
+
+It features a **Zero-Interrupt Architecture** for Generic mode, ensuring stability on UART-based WiFi modules like the **Arduino UNO R4 WiFi** and **Nano 33 IoT**.
 
 ---
 
@@ -15,10 +17,11 @@
 - [Configuration Macros](#-configuration-macros)
 - [Usage Guide](#-usage-guide)
     - [1. Secure Server (ESP32 Native)](#1-secure-websocket-server-wss-esp32-native)
-    - [2. Secure Server (ESP8266 Wrapper)](#2-secure-websocket-server-wss-esp8266-wrapper)
-    - [3. Standard Server (WS)](#3-standard-websocket-server-ws)
-    - [4. Secure Client (ESP32 Native)](#4-secure-websocket-client-wss-esp32-native)
-    - [5. Generic Client (WS/WSS)](#5-generic-websocket-client-wswss)
+    - [2. Secure Server (ESP8266 / Pico W - Wrapper)](#2-secure-websocket-server-wss-esp8266--pico-w---wrapper)
+    - [3. Standard Server (ESP32/ESP8266 - LwIP Mode)](#3-standard-server-esp32esp8266---lwip-mode)
+    - [4. Standard Server (Uno R4 / MKR / Nano - Generic Mode)](#4-standard-server-uno-r4--mkr--nano---generic-mode)
+    - [5. Secure Client (ESP32 Native)](#5-secure-websocket-client-wss-esp32-native)
+    - [6. Generic Client (WS/WSS)](#6-generic-websocket-client-wswss)
 - [License](#-license)
 
 ---
@@ -27,23 +30,33 @@
 
 * **🔒 Secure WebSockets (WSS):**
     * **ESP32:** Native, high-performance WSS Server and Client using the internal `esp_tls` stack.
-    * **ESP8266 and RPi Pico W:** WSS support via standard `WiFiServerSecure` / `WiFiClientSecure` wrapping.
+    * **ESP8266 / Pico W:** WSS Server/Client support via `WiFiServerSecure` / `WiFiClientSecure` wrapping.
 * **⚡ Dual-Mode Architecture:**
-    * **Generic Mode:** Maximum compatibility using standard `WiFiServer` / `WiFiClient` polling.
+    * **Generic Mode:** Maximum compatibility using standard `WiFiServer` / `WiFiClient` wrapping. Supports **accept()** logic for robust connection handling on newer boards.
     * **LwIP Mode:** High-performance, low-overhead mode using native LwIP callbacks (ESP32/ESP8266).
+* **🛡️ Robust Stability:**
+    * **Zero-Interrupt Locking:** Prevents UART deadlocks on Arduino Uno R4 WiFi and Nano 33 IoT.
+    * **Smart Duplicate Detection:** Automatically handles and cleans up duplicate socket handles returned by underlying WiFi libraries.
 * **📨 Event-Driven:** Non-blocking, callback-based architecture for handling Connect, Disconnect, Text, and Binary events.
-* **🔌 Universal Client:** Compatible with any Arduino-supported network interface (`WiFiClient`, `WiFiClientSecure`, `EthernetClient`).
 
 ---
 
 ## 📦 Supported Platforms
 
-| Platform | WS Server | WSS Server | WS Client | WSS Client | LwIP Mode (Async) |
-| :--- | :---: | :---: | :---: | :---: | :---: |
-| **ESP32** | ✅ | ✅ | ✅ | ✅ | ✅ |
-| **ESP8266** | ✅ | ✅ | ✅ | ✅ | ✅ |
-| **RP2040 (Pico W)** | ✅ | ✅ | ✅ | ✅ | ❌ |
-| **STM32 / Teensy / Renesas / AVR** | ✅ | ❌ | ✅ | ✅ | ❌ |
+| Platform | WS Server | WSS Server | WS Client | WSS Client | Mode |
+| :--- | :---: | :---: | :---: | :---: | :--- |
+| **ESP32** | ✅ | ✅ | ✅ | ✅ | LwIP / Generic |
+| **ESP8266** | ✅ | ✅ | ✅ | ✅ | LwIP / Generic |
+| **RP2040 (Pico W)** | ✅ | ✅ | ✅ | ✅ | Generic |
+| **Arduino UNO R4 WiFi** | ✅ | ❌ | ✅ | ✅ | Generic |
+| **SAMD (MKR / Nano 33)**| ✅ | ❌ | ✅ | ✅ | Generic |
+
+### 📝 Platform Notes
+* **ESP8266 / Pico W:** 
+  * WSS Server requires passing a `WiFiServerSecure` instance to `begin()`.
+* **Arduino R4 / SAMD:** 
+  * WS Server requires passing a `WiFiServer` instance.
+  * WSS Client requires Root CA certificates to be uploaded via the Arduino IDE (Tools > WiFi101 / WiFiNINA Firmware Updater).
 
 ---
 
@@ -105,25 +118,26 @@ void loop() {
 }
 ```
 
-### 2. Secure WebSocket Server (WSS) [ESP8266 Wrapper]
-ESP8266 uses the Generic Mode to wrap the standard `WiFiServerSecure`.
+### 2. Secure WebSocket Server (WSS) [ESP8266 / Pico W - Wrapper]
+ESP8266 and RPi Pico W use the Generic Mode to wrap their native `WiFiServerSecure`.
 
 ```cpp
-#include <ESP8266WiFi.h>
+#include <WiFi.h> // or ESP8266WiFi.h
 #include "NuSock.h"
 
 NuSockServer wss;
 WiFiServerSecure server(443);
 
-// BearSSL Containers
-BearSSL::X509List cert(server_cert);
-BearSSL::PrivateKey key(server_key);
+// Certificates (BearSSL for ESP8266 / Certs for Pico W)
+const char* cert = "...";
+const char* key = "...";
 
 void setup() {
     WiFi.begin("SSID", "PASS");
     
-    // Configure BearSSL
-    server.setRSACert(&cert, &key);
+    // Configure SSL Server
+    server.setServerCert(cert); // API varies by platform/core
+    server.setServerKey(key);
     server.begin();
 
     // Bind NuSock to the secure server
@@ -136,23 +150,22 @@ void loop() {
 }
 ```
 
-### 3. Standard WebSocket Server (WS)
-Ideal for local networks (ESP32/ESP8266/Pico W). Use `NUSOCK_SERVER_USE_LWIP` for best performance on ESPs.
+### 3. Standard Server (ESP32/ESP8266 - LwIP Mode)
+Ideal for high-performance non-SSL applications.
 
 ```cpp
-#define NUSOCK_SERVER_USE_LWIP // Optional: Enable LwIP mode (ESP only)
-#include <WiFi.h>
+#define NUSOCK_SERVER_USE_LWIP 
+#include <WiFi.h> // or ESP8266WiFi.h
 #include "NuSock.h"
 
 NuSockServer ws;
 
 void setup() {
-    ws.begin(80); 
-    ws.onEvent([](NuClient* c, NuServerEvent e, const uint8_t* p, size_t l){
-        if(e == SERVER_EVENT_CLIENT_CONNECTED) {
-            Serial.println("New Client!");
-        }
-    });
+    WiFi.begin("SSID", "PASS");
+    // ... wait ...
+    
+    ws.onEvent(onEvent);
+    ws.begin(80); // Internal LwIP server created automatically
 }
 
 void loop() {
@@ -160,7 +173,35 @@ void loop() {
 }
 ```
 
-### 4. Secure WebSocket Client (WSS) [ESP32 Native]
+### 4. Standard Server (Uno R4 / MKR / Nano - Generic Mode)
+Compatible with **Arduino Uno R4 WiFi**, **Nano 33 IoT**, **MKR 1010**, etc. NuSock wraps the existing `WiFiServer` object.
+
+```cpp
+#include <WiFiS3.h> // Or WiFiNINA.h
+#include "NuSock.h"
+
+// 1. Create the standard WiFiServer
+WiFiServer server(80);
+NuSockServer ws;
+
+void setup() {
+    WiFi.begin("SSID", "PASS");
+    // ... wait ...
+
+    // 2. Start the underlying server
+    server.begin();
+
+    // 3. Bind NuSock to it
+    ws.onEvent(onEvent);
+    ws.begin(&server, 80);
+}
+
+void loop() {
+    ws.loop();
+}
+```
+
+### 5. Secure WebSocket Client (WSS) [ESP32 Native]
 ESP32 can use `NuSockClientSecure` which uses the native `esp_tls` stack for high performance.
 
 ```cpp
@@ -186,8 +227,8 @@ void loop() {
 }
 ```
 
-### 5. Generic WebSocket Client (WS/WSS)
-Compatible with `WiFiClient`, `WiFiClientSecure`, or `EthernetClient`. Works on all platforms (ESP8266, RP2040, STM32, etc.).
+### 6. Generic WebSocket Client (WS/WSS)
+Compatible with `WiFiClient`, `WiFiClientSecure`, or `EthernetClient`. Works on all platforms (Uno R4, MKR, ESP8266, etc.).
 
 ```cpp
 #include <WiFiClientSecure.h>
@@ -197,7 +238,7 @@ WiFiClientSecure secureClient;
 NuSockClient client;
 
 void setup() {
-    secureClient.setInsecure(); // Allow self-signed certs
+    secureClient.setInsecure(); // Allow self-signed certs (if needed)
     
     client.begin(&secureClient, "example.com", 443, "/ws");
     client.connect();

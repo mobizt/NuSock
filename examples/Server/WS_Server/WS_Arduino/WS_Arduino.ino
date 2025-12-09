@@ -32,14 +32,18 @@
 // For UNO R4 WiFi
 // #include <WiFiS3.h>
 
+// For Raspberry Pi Pico W
+// #include <WiFi.h>
+
 #include <NuSock.h>
 
-const char *ssid = "YOUR_SSID";
-const char *password = "YOUR_PASS";
+const char *ssid = "SSID";
+const char *password = "Password";
+const uint16_t port = 80;
 
 // Use EthernetServer for STM32, Teensy and other Arduino boards.
 
-WiFiServer server(80); // External Server required for Generic Mode
+WiFiServer server(port); // External Server required for Generic Mode
 NuSockServer ws;
 
 void onWebSocketEvent(NuClient *client, NuServerEvent event, const uint8_t *payload, size_t len)
@@ -47,26 +51,26 @@ void onWebSocketEvent(NuClient *client, NuServerEvent event, const uint8_t *payl
     switch (event)
     {
     case SERVER_EVENT_CONNECT:
-        Serial.println("[WS] WebSocket Server Started.");
+        NuSock::printLog("WS  ", "WebSocket Server Started.\n");
         break;
 
     case SERVER_EVENT_CLIENT_HANDSHAKE:
-        NuSock::printf("[WS][%d] Client sent handshake.\n", client->index);
+        NuSock::printLog("WS  ", "[%d] Client sent handshake.\n", client->index);
         break;
 
     case SERVER_EVENT_CLIENT_CONNECTED:
-        NuSock::printf("[WS][%d] Client handshake successful - WS OPEN!\n", client->index);
+        NuSock::printLog("WS  ", "[%d] Client handshake successful.\n", client->index);
         // Optionally send a welcome message
         ws.send(client->index, "Welcome!");
         break;
 
     case SERVER_EVENT_CLIENT_DISCONNECTED:
-        NuSock::printf("[WS][%d] Client disconnected.\n", client->index);
+        NuSock::printLog("WS  ", "[%d] Client disconnected.\n", client->index);
         break;
 
     case SERVER_EVENT_MESSAGE_TEXT:
     {
-        NuSock::printf("[WS][%d] Received Text: ", client->index);
+        NuSock::printLog("WS  ", "[%d] Received Text: ", client->index);
         for (size_t i = 0; i < len; i++)
             Serial.print((char)payload[i]);
         Serial.println();
@@ -82,11 +86,11 @@ void onWebSocketEvent(NuClient *client, NuServerEvent event, const uint8_t *payl
     break;
 
     case SERVER_EVENT_MESSAGE_BINARY:
-        NuSock::printf("[WS][%d] Received Binary: %d bytes\n", client->index, len);
+        NuSock::printLog("WS  ", "[%d] Received Binary: %d bytes\n", client->index, len);
         break;
 
     case SERVER_EVENT_ERROR:
-        NuSock::printf("[WS][%d] Error: %s\n", client->index, payload ? (const char *)payload : "Unknown");
+        NuSock::printLog("WS  ", "[%d] Error: %s\n", client->index, payload ? (const char *)payload : "Unknown");
         break;
 
     default:
@@ -97,26 +101,38 @@ void onWebSocketEvent(NuClient *client, NuServerEvent event, const uint8_t *payl
 void setup()
 {
     Serial.begin(115200);
-    delay(5000);
+    while (!Serial)
+        ; // Wait for serial
 
-    Serial.print("Connecting to WiFi");
+    delay(3000);
+
+    Serial.println();
+
+    NuSock::printLog("INFO", "NuSock WS Server v%s Booting\n", NUSOCK_VERSIOn_STR);
+
+    // Connect to WiFi
+    NuSock::printLog("NET ", "Connecting to WiFi (%s)...\n", ssid);
     WiFi.begin(ssid, password);
 
     while (WiFi.status() != WL_CONNECTED)
     {
-        delay(200);
-        Serial.print(".");
+        delay(500);
     }
 
-    Serial.println(" Connected!");
-    Serial.print("IP Address: ");
-    NuSock::printIP(WiFi.localIP());
+    // Waits until we got the IP
+    while (WiFi.localIP() == (IPAddress)INADDR_NONE)
+        ;
+
+    NuSock::printLog("NET ", "WiFi Connected (%s)\n", NuSock::ipStr(WiFi.localIP()));
+    NuSock::printLog("NET ", "Gateway: %s\n", NuSock::ipStr(WiFi.gatewayIP()));
+    NuSock::printLog("WS  ", "Server started on port %d\n", port);
+    NuSock::printLog("WS  ", "Ready: ws://%s\n", NuSock::ipStr(WiFi.localIP()));
 
     ws.onEvent(onWebSocketEvent);
 
     // Start Server
-    server.begin();        // Start the underlying server
-    ws.begin(&server, 80); // Generic Mode: Pass server reference and port
+    server.begin();          // Start the underlying server
+    ws.begin(&server, port); // Generic Mode: Pass server reference and port
 }
 
 void loop()

@@ -14,8 +14,6 @@ class NuLock
 private:
 #if defined(ESP32) || defined(ARDUINO_ARCH_ESP32)
     SemaphoreHandle_t _mutex;
-#else
-    volatile bool _locked;
 #endif
 
 public:
@@ -30,7 +28,8 @@ public:
 #if defined(ESP32) || defined(ARDUINO_ARCH_ESP32)
         xSemaphoreTakeRecursive(_mutex, portMAX_DELAY);
 #else
-        noInterrupts();
+        // Do not disable interrupts on AVR/SAMD/Renesas.
+        // It blocks UART communication with WiFi modules (NINA/S3).
 #endif
     }
     void unlock()
@@ -38,7 +37,7 @@ public:
 #if defined(ESP32) || defined(ARDUINO_ARCH_ESP32)
         xSemaphoreGiveRecursive(_mutex);
 #else
-        interrupts();
+        // Interrupts remain enabled.
 #endif
     }
 };

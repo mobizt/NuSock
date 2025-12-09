@@ -92,7 +92,7 @@ private:
                     _internalClient->rxBuffer[MAX_WS_BUFFER - 1] = 0;
 
 #if defined(NUSOCK_DEBUG)
-// Serial.println((char*)_internalClient->rxBuffer);
+// NuSock::printLog("DBG ", "%s",(char*)_internalClient->rxBuffer);
 #endif
 
                 // Check for successful upgrade
@@ -236,7 +236,7 @@ public:
         if (!_tls)
         {
 #if defined(NUSOCK_DEBUG)
-            Serial.println("[WSS] TLS Init Failed");
+            NuSock::printLog("DBG ", "TLS Init Failed\n");
 #endif
             return false;
         }
@@ -249,7 +249,7 @@ public:
         if (ret != 1)
         { // indicates success
 #if defined(NUSOCK_DEBUG)
-            Serial.printf("[WSS] Connection Failed. Error: %d\n", ret);
+            NuSock::printLog("DBG ", "Connection Failed. Error: %d\n", ret);
 #endif
             esp_tls_conn_destroy(_tls);
             _tls = nullptr;
@@ -292,7 +292,7 @@ public:
             else if (ret != ESP_TLS_ERR_SSL_WANT_READ && ret != ESP_TLS_ERR_SSL_WANT_WRITE)
             {
 #if defined(NUSOCK_DEBUG)
-                Serial.println("[WSS] Failed sending handshake");
+                NuSock::printLog("DBG ", "Failed sending handshake\n");
 #endif
                 stop();
                 return false;
@@ -366,7 +366,7 @@ public:
             else if (sent != ESP_TLS_ERR_SSL_WANT_READ && sent != ESP_TLS_ERR_SSL_WANT_WRITE)
             {
 #if defined(NUSOCK_DEBUG)
-                Serial.println("[WSS] Write Error");
+                NuSock::printLog("DBG ", "Write Error\n");
 #endif
                 // Optional: stop() on write error
             }

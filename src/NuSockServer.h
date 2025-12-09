@@ -12,8 +12,7 @@
 #include "NuSockTypes.h"
 #include "vector/dynamic/DynamicVector.h"
 
-
-// Callback Signature (uses client->index inside NuClient)
+// Callback Signature
 typedef void (*NuServerEventCallback)(NuClient *client, NuServerEvent event, const uint8_t *payload, size_t len);
 
 class NuSockServer
@@ -28,9 +27,8 @@ private:
 #ifdef NUSOCK_USE_LWIP
     struct tcp_pcb *server_pcb = nullptr;
 #else
-    // GENERIC MODE VARIABLES
     void *_genericServerRef = nullptr;
-    Client *(*_acceptFunc)(void *) = nullptr;
+    NuClient *(*_acceptFunc)(void *, NuSockServer *) = nullptr;
 #endif
 
     void removeClient(NuClient *c)
@@ -40,7 +38,6 @@ private:
             if (clients[i] == c)
             {
                 clients.erase(i);
-                // Update index for remaining clients
                 for (size_t j = i; j < clients.size(); j++)
                 {
                     clients[j]->index = j;
@@ -48,15 +45,22 @@ private:
                 break;
             }
         }
-
         if (c->rxBuffer)
         {
             free(c->rxBuffer);
             c->rxBuffer = nullptr;
         }
-
         if (c)
+        {
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdelete-non-virtual-dtor"
+#endif
             delete c;
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
+        }
     }
 
     void buildFrame(NuClient *c, uint8_t opcode, const uint8_t *data, size_t len)
@@ -77,7 +81,6 @@ private:
     }
 
 #ifdef NUSOCK_USE_LWIP
-
     static void static_close_client(void *arg)
     {
         NuClient *c = (NuClient *)arg;
@@ -85,11 +88,9 @@ private:
             return;
         NuSockServer *s = (NuSockServer *)c->server;
         s->myLock.lock();
-
         if (s->_onEvent && c->last_event != SERVER_EVENT_CLIENT_DISCONNECTED)
             s->_onEvent(c, SERVER_EVENT_CLIENT_DISCONNECTED, nullptr, 0);
         c->last_event = SERVER_EVENT_CLIENT_DISCONNECTED;
-
         if (c->pcb)
         {
             tcp_arg(c->pcb, NULL);
@@ -99,7 +100,6 @@ private:
         s->removeClient(c);
         s->myLock.unlock();
     }
-
     static void static_flush_client(void *arg)
     {
         NuClient *c = (NuClient *)arg;
@@ -132,9 +132,6 @@ private:
             }
             else
             {
-#if defined(NUSOCK_DEBUG)
-                Serial.println("[WS Debug] Error: Write Error");
-#endif
                 if (s->_onEvent)
                     s->_onEvent(c, SERVER_EVENT_ERROR, (const uint8_t *)"Write Error", 11);
                 c->last_event = SERVER_EVENT_ERROR;
@@ -144,12 +141,10 @@ private:
         tcp_output(c->pcb);
         s->myLock.unlock();
     }
-
     void lwip_process(NuClient *c)
     {
         if (!c->rxBuffer)
             return;
-
         while (c->rxLen > 0)
         {
             if (c->rxLen < 2)
@@ -168,9 +163,6 @@ private:
             }
             else if (payloadLen == 127)
             {
-#if defined(NUSOCK_DEBUG)
-                Serial.println("[WS Debug] Error: Frame Too Large");
-#endif
                 if (_onEvent)
                     _onEvent(c, SERVER_EVENT_ERROR, (const uint8_t *)"Frame Too Large", 15);
                 c->last_event = SERVER_EVENT_ERROR;
@@ -187,14 +179,12 @@ private:
                 tcpip_callback(static_close_client, c);
                 return;
             }
-
             if ((opcode == 0x1 || opcode == 0x2) && isMasked)
             {
                 uint8_t mask[4] = {c->rxBuffer[maskOffset], c->rxBuffer[maskOffset + 1], c->rxBuffer[maskOffset + 2], c->rxBuffer[maskOffset + 3]};
                 uint8_t *payload = &c->rxBuffer[headerSize];
                 for (size_t i = 0; i < payloadLen; i++)
                     payload[i] ^= mask[i % 4];
-
                 if (opcode == 0x1)
                 {
                     if (_onEvent)
@@ -215,7 +205,6 @@ private:
             c->rxLen = rem;
         }
     }
-
     static err_t cb_recv(void *arg, struct tcp_pcb *pcb, struct pbuf *p, err_t err)
     {
         NuClient *c = (NuClient *)arg;
@@ -224,16 +213,13 @@ private:
             tcpip_callback(static_close_client, c);
             return ERR_OK;
         }
-
         tcp_recved(pcb, p->tot_len);
-
         if (!c->rxBuffer)
         {
             pbuf_free(p);
             tcpip_callback(static_close_client, c);
             return ERR_MEM;
         }
-
         struct pbuf *ptr = p;
         while (ptr)
         {
@@ -245,9 +231,7 @@ private:
             ptr = ptr->next;
         }
         pbuf_free(p);
-
         NuSockServer *s = (NuSockServer *)c->server;
-
         if (c->state == NuClient::STATE_HANDSHAKE)
         {
             if (c->rxLen > 100)
@@ -263,7 +247,6 @@ private:
                         if (s->_onEvent)
                             s->_onEvent(c, SERVER_EVENT_CLIENT_HANDSHAKE, nullptr, 0);
                         c->last_event = SERVER_EVENT_CLIENT_HANDSHAKE;
-
                         char *keyHeader = strstr(reqBuf, "Sec-WebSocket-Key: ");
                         if (keyHeader)
                         {
@@ -277,19 +260,15 @@ private:
                                     keyLen = 63;
                                 strncpy(clientKey, keyHeader, keyLen);
                                 clientKey[keyLen] = 0;
-
                                 char acceptKey[64];
                                 NuCrypto::getAcceptKey(clientKey, acceptKey, sizeof(acceptKey));
-
                                 char respHead[] = "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ";
                                 tcp_write(pcb, respHead, strlen(respHead), TCP_WRITE_FLAG_COPY | TCP_WRITE_FLAG_MORE);
                                 tcp_write(pcb, acceptKey, strlen(acceptKey), TCP_WRITE_FLAG_COPY | TCP_WRITE_FLAG_MORE);
                                 tcp_write(pcb, "\r\n\r\n", 4, TCP_WRITE_FLAG_COPY);
-
                                 tcp_output(pcb);
                                 c->state = NuClient::STATE_CONNECTED;
                                 c->rxLen = 0;
-
                                 if (s->_onEvent)
                                     s->_onEvent(c, SERVER_EVENT_CLIENT_CONNECTED, nullptr, 0);
                                 c->last_event = SERVER_EVENT_CLIENT_CONNECTED;
@@ -298,9 +277,6 @@ private:
                     }
                     else
                     {
-#if defined(NUSOCK_DEBUG)
-                        Serial.println("[WS Debug] Error: Invalid Handshake");
-#endif
                         if (s->_onEvent)
                             s->_onEvent(c, SERVER_EVENT_ERROR, (const uint8_t *)"Invalid Handshake", 17);
                         c->last_event = SERVER_EVENT_ERROR;
@@ -326,7 +302,6 @@ private:
         tcp_sent(newpcb, [](void *arg, struct tcp_pcb *pcb, u16_t len) -> err_t
                  { tcpip_callback(static_flush_client, arg); return ERR_OK; });
         ip_set_option(newpcb, SOF_KEEPALIVE);
-
         s->myLock.unlock();
         return ERR_OK;
     }
@@ -340,7 +315,6 @@ private:
             s->server_pcb = tcp_listen(s->server_pcb);
             tcp_arg(s->server_pcb, s);
             tcp_accept(s->server_pcb, cb_accept);
-
             if (s->_onEvent)
                 s->_onEvent(nullptr, SERVER_EVENT_CONNECT, nullptr, 0);
         }
@@ -374,7 +348,7 @@ private:
 
         if (c->state == NuClient::STATE_HANDSHAKE)
         {
-            if (c->rxLen > 100)
+            if (c->rxLen > 0)
             {
                 if (c->rxLen < MAX_WS_BUFFER)
                     c->rxBuffer[c->rxLen] = 0;
@@ -420,9 +394,6 @@ private:
                     }
                     else
                     {
-#if defined(NUSOCK_DEBUG)
-                        Serial.println("[WS Debug] Error: Invalid Handshake");
-#endif
                         if (_onEvent)
                             _onEvent(c, SERVER_EVENT_ERROR, (const uint8_t *)"Invalid Handshake", 17);
                         c->last_event = SERVER_EVENT_ERROR;
@@ -472,20 +443,8 @@ private:
 
                     if (opcode == 0x1)
                     {
-                        if (c->id[0] == 0)
-                        {
-                            char saved = payload[payloadLen];
-                            payload[payloadLen] = 0;
-                            strncpy(c->id, (char *)payload, sizeof(c->id) - 1);
-                            c->id[sizeof(c->id) - 1] = 0;
-                            payload[payloadLen] = saved;
-
-                            if (_onEvent)
-                                _onEvent(c, SERVER_EVENT_MESSAGE_TEXT, payload, payloadLen);
-                        }
-                        else if (_onEvent)
+                        if (_onEvent)
                             _onEvent(c, SERVER_EVENT_MESSAGE_TEXT, payload, payloadLen);
-
                         c->last_event = SERVER_EVENT_MESSAGE_TEXT;
                     }
                     else if (opcode == 0x2)
@@ -528,10 +487,7 @@ public:
      * @brief Destroy the Nu Sock Server object.
      * Stops the server and disconnects all clients.
      */
-    ~NuSockServer()
-    {
-        stop();
-    }
+    ~NuSockServer() { stop(); }
 
     /**
      * @brief Stop the server.
@@ -542,7 +498,6 @@ public:
     {
         if (!_running)
             return;
-
         myLock.lock();
         for (size_t i = 0; i < clients.size(); i++)
         {
@@ -556,22 +511,13 @@ public:
             }
 #else
             if (c->client)
-            {
                 c->client->stop();
-            }
 #endif
-
             if (c->rxBuffer)
-            {
                 free(c->rxBuffer);
-                c->rxBuffer = nullptr;
-            }
-
-            if (c)
-                delete c;
+            delete c;
         }
         clients.clear();
-
 #ifdef NUSOCK_USE_LWIP
 #if defined(ESP8266) || defined(ARDUINO_ARCH_RP2040)
         static_stop(this);
@@ -581,7 +527,6 @@ public:
 #else
         _acceptFunc = nullptr;
 #endif
-
         _running = false;
         if (_onEvent)
             _onEvent(nullptr, SERVER_EVENT_DISCONNECTED, nullptr, 0);
@@ -589,10 +534,6 @@ public:
     }
 
 #ifdef NUSOCK_USE_LWIP
-    /**
-     * @brief Start the WebSocket Server (LwIP Mode).
-     * @param port The port to listen on (e.g., 80 or 8080).
-     */
     void begin(uint16_t port)
     {
         if (_running)
@@ -621,24 +562,44 @@ public:
         _port = port;
         _genericServerRef = server;
 
-        _acceptFunc = [](void *s) -> Client *
+        _acceptFunc = [](void *s, NuSockServer *ns) -> NuClient *
         {
             ServerType *srv = (ServerType *)s;
-#if defined(ARDUINO_ARCH_RP2040) || defined(ESP32)
+
+// PLATFORM ADAPTIVE ACCEPT
+// Use accept() for UNO R4 (S3), NINA, ESP, RP2040.
+// Exclude SAMD MKR1000 specifically (WiFi101 doesn't support accept).
+#if (defined(ARDUINO_ARCH_SAMD) && !defined(ARDUINO_SAMD_MKR1000)) || defined(ARDUINO_SAMD_MKRWIFI1010) || defined(ARDUINO_NANO_33_IOT) || defined(ARDUINO_ARCH_RP2040) || defined(ESP32) || defined(ESP8266) || defined(ARDUINO_UNOR4_WIFI)
             auto c = srv->accept();
 #else
             auto c = srv->available();
 #endif
+
             if (c)
             {
-                return (Client *)new decltype(c)(c);
+                // Copy the client object to heap to persist it.
+                Client *clientWrapper = new decltype(c)(c);
+                NuClient *nc = new NuClient(ns, clientWrapper, true);
+                nc->remoteIP = c.remoteIP();
+                nc->remotePort = c.remotePort();
+                return nc;
             }
-            return (Client *)nullptr;
+            return nullptr;
         };
 
+        // DOUBLE BEGIN CHECK
+        // Only call begin() if server is not already running.
+        // MKR1000 (WiFi101) does not support operator bool(), so we skip check there.
+#if defined(ARDUINO_SAMD_MKRWIFI1010) || defined(ARDUINO_NANO_33_IOT) || defined(ARDUINO_UNOR4_WIFI)
+        if (!(*server))
+        {
+            server->begin();
+        }
+#else
         server->begin();
-        _running = true;
+#endif
 
+        _running = true;
         if (_onEvent)
             _onEvent(nullptr, SERVER_EVENT_CONNECT, nullptr, 0);
     }
@@ -646,8 +607,6 @@ public:
 
     /**
      * @brief Main processing loop.
-     * MUST be called frequently in the main Arduino loop() when using Generic Mode.
-     * Accepts new clients and processes data for existing clients.
      */
     void loop()
     {
@@ -655,27 +614,90 @@ public:
         if (!_genericServerRef || !_acceptFunc)
             return;
 
-        Client *tempC = _acceptFunc(_genericServerRef);
+        NuClient *newClient = _acceptFunc(_genericServerRef, this);
 
-        if (tempC)
+        if (newClient)
         {
-            myLock.lock();
-            NuClient *c = new NuClient(this, tempC, true /* true for self dynamic allocated client */);
-            if (c->rxBuffer)
+            if (!newClient->client || !newClient->client->connected())
             {
-                c->index = clients.size();
-                clients.push_back(c);
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdelete-non-virtual-dtor"
+#endif
+                delete newClient;
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
             }
             else
             {
-#if defined(NUSOCK_DEBUG)
-                Serial.println("[WS Debug] Error: Alloc Failed");
+                // DUPLICATE CHECK
+                bool duplicate = false;
+                myLock.lock();
+                for (size_t i = 0; i < clients.size(); i++)
+                {
+                    if (clients[i]->client && clients[i]->client->connected())
+                    {
+                        if (clients[i]->remoteIP == newClient->remoteIP &&
+                            clients[i]->remotePort == newClient->remotePort)
+                        {
+                            duplicate = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (duplicate)
+                {
+
+                    // SAFE DUPLICATE CLEANUP
+                    // Ethernet (Teensy/Mega/STM32) and WiFiS3 (R4) clients MUST be deleted to avoid leaks.
+                    // WiFi101 (MKR1000) and WiFiNINA clients MUST NOT be deleted to avoid closing the socket.
+
+                    Client *rawWrapper = newClient->client;
+
+                    // Detach from NuClient to prevent stop() call in ~NuClient destructor
+                    newClient->client = nullptr;
+
+                    // Delete NuClient container
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdelete-non-virtual-dtor"
 #endif
-                if (_onEvent)
-                    _onEvent(c, SERVER_EVENT_ERROR, (const uint8_t *)"Alloc Failed", 12);
-                delete c;
+                    delete newClient;
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
+
+// Delete the wrapper for Safe Platforms (Ethernet/S3)
+#if defined(ARDUINO_UNOR4_WIFI) || defined(TEENSYDUINO) || defined(ARDUINO_ARCH_STM32) || defined(ARDUINO_ARCH_AVR) || defined(ESP32) || defined(ESP8266)
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdelete-non-virtual-dtor"
+#endif
+                    if (rawWrapper)
+                        delete rawWrapper;
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
+#else
+                    (void)rawWrapper; // Keep it alive for NINA/101
+#endif
+                }
+                else
+                {
+                    if (newClient->rxBuffer)
+                    {
+                        newClient->index = clients.size();
+                        clients.push_back(newClient);
+                    }
+                    else
+                    {
+                        delete newClient;
+                    }
+                }
+                myLock.unlock();
             }
-            myLock.unlock();
         }
 
         myLock.lock();
@@ -754,14 +776,11 @@ public:
     {
         if (index >= (int)clients.size())
             return;
-
         myLock.lock();
-        size_t len = strlen(msg);
-
         NuClient *c = clients[index];
         if (c->state == NuClient::STATE_CONNECTED)
         {
-            buildFrame(c, 0x1, (const uint8_t *)msg, len);
+            buildFrame(c, 0x1, (const uint8_t *)msg, strlen(msg));
 #ifdef NUSOCK_USE_LWIP
             tcpip_callback(static_flush_client, c);
 #endif
@@ -779,7 +798,6 @@ public:
     {
         if (index >= (int)clients.size())
             return;
-
         myLock.lock();
         NuClient *c = clients[index];
         if (c->state == NuClient::STATE_CONNECTED)

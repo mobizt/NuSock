@@ -132,9 +132,7 @@ private:
         if (ret > 0)
         {
 #if defined(NUSOCK_DEBUG)
-            Serial.print("[WSS Debug] Read ");
-            Serial.print(ret);
-            Serial.println(" bytes from SSL connection");
+            NuSock::printLog("DBG ", "Read %d bytes from SSL connection\n");
 #endif
 
             // Copy to RX buffer
@@ -420,7 +418,7 @@ public:
         if (_serverSock < 0)
         {
 #if defined(NUSOCK_DEBUG)
-            Serial.println("[WSS Debug] Failed to create socket");
+            NuSock::printLog("DBG ", "Failed to create socket\n");
 #endif
             return false;
         }
@@ -442,7 +440,7 @@ public:
         if (bind(_serverSock, (struct sockaddr *)&addr, sizeof(addr)) < 0)
         {
 #if defined(NUSOCK_DEBUG)
-            Serial.println("[WSS Debug] Failed to bind socket");
+            NuSock::printLog("DBG ", "Failed to bind socket\n");
 #endif
             close(_serverSock);
             _serverSock = -1;
@@ -453,7 +451,7 @@ public:
         if (listen(_serverSock, 5) < 0)
         {
 #if defined(NUSOCK_DEBUG)
-            Serial.println("[WSS Debug] Failed to listen on socket");
+            NuSock::printLog("DBG ", "Failed to listen on socket\n");
 #endif
             close(_serverSock);
             _serverSock = -1;
@@ -492,14 +490,14 @@ public:
             if (tls)
             {
 #if defined(NUSOCK_DEBUG)
-                Serial.println("[WSS Debug] Starting SSL Handshake...");
+                NuSock::printLog("DBG ", "Starting SSL Handshake...\n");
 #endif
                 int ret = esp_tls_server_session_create(&_tlsCfg, clientSock, tls);
 
                 if (ret == 0)
                 {
 #if defined(NUSOCK_DEBUG)
-                    Serial.println("[WSS Debug] SSL Handshake Success! Switching to Non-Blocking.");
+                    NuSock::printLog("DBG ", "SSL Handshake Success! Switching to Non-Blocking.\n");
 #endif
 
                     // NOW set to Non-Blocking for normal data usage
@@ -527,7 +525,7 @@ public:
                 else
                 {
 #if defined(NUSOCK_DEBUG)
-                    Serial.printf("[WSS Debug] SSL Handshake Failed! Error: -0x%x\n", -ret);
+                    NuSock::printLog("DBG ", "SSL Handshake Failed! Error: -0x%x\n", -ret);
 #endif
                     esp_tls_server_session_delete(tls);
                     close(clientSock);
@@ -536,7 +534,7 @@ public:
             else
             {
 #if defined(NUSOCK_DEBUG)
-                Serial.println("[WSS Debug] Failed to init TLS");
+                NuSock::printLog("DBG ", "Failed to init TLS\n");
 #endif
                 close(clientSock);
             }

@@ -26,14 +26,17 @@
 // For UNO R4 WiFi
 // #include <WiFiS3.h>
 
+// For Raspberry Pi Pico W
+// #include <WiFi.h>
+
 // The non-SSL websocket server connection
 // might fail in the case of UNO R4 WiFi,
 // use WiFiSSLClient and port 443 instead.
 #include <NuSock.h>
 
 // Network Credentials
-const char *ssid = "YOUR_SSID";
-const char *password = "YOUR_PASS";
+const char *ssid = "SSID";
+const char *password = "Password";
 
 // Use EthernetClient for STM32, Teensy and other Arduino boards.
 // #include <Ethernet.h>
@@ -48,32 +51,32 @@ void onWebSocketEvent(NuClient *client, NuClientEvent event, const uint8_t *payl
     switch (event)
     {
     case CLIENT_EVENT_HANDSHAKE:
-        Serial.println("[WS] Handshake completed!");
+        NuSock::printLog("WS  ", "Handshake completed!");
         break;
 
     case CLIENT_EVENT_CONNECTED:
-        Serial.println("[WS] Connected to server!");
+        NuSock::printLog("WS  ", "Connected to server!");
         // Send a message immediately upon connection
-        ws.send("Hello from WS Client");
+        wss.send("Hello from WS Client");
         break;
 
     case CLIENT_EVENT_DISCONNECTED:
-        Serial.println("[WS] Disconnected!");
+        NuSock::printLog("WS  ", "Disconnected!");
         break;
 
     case CLIENT_EVENT_MESSAGE_TEXT:
-        Serial.print("[WS] Text: ");
+        NuSock::printLog("WS  ", "Text: ");
         for (size_t i = 0; i < len; i++)
             Serial.print((char)payload[i]);
         Serial.println();
         break;
 
     case CLIENT_EVENT_MESSAGE_BINARY:
-        NuSock::printf("[WS] Binary: %d bytes\n", len);
+        NuSock::printLog("WS  ", "Binary: %d bytes\n", len);
         break;
 
     case CLIENT_EVENT_ERROR:
-        NuSock::printf("[WS] Error: %s\n", payload ? (const char *)payload : "Unknown");
+        NuSock::printLog("WS  ", "Error: %s\n", payload ? (const char *)payload : "Unknown");
         break;
     }
 }
@@ -82,37 +85,40 @@ void setup()
 {
 
     Serial.begin(115200);
-    delay(5000);
+    while (!Serial)
+        ; // Wait for serial
 
-    Serial.print("Connecting to WiFi");
+    delay(3000);
+
+    Serial.println();
+
+    NuSock::printLog("INFO", "NuSock WS Client v%s Booting", NUSOCK_VERSIOn_STR);
+
+    // Connect to WiFi
+    NuSock::printLog("NET ", "Connecting to WiFi (%s)...", ssid);
     WiFi.begin(ssid, password);
 
     while (WiFi.status() != WL_CONNECTED)
     {
-        delay(200);
-        Serial.print(".");
+        delay(500);
     }
 
-    Serial.println(" Connected!");
-    Serial.print("IP Address: ");
-    NuSock::printIP(WiFi.localIP());
+    NuSock::printLog("NET ", "WiFi Connected (%s)", NuSock::ipStr(WiFi.localIP()));
+    NuSock::printLog("NET ", "Gateway: %s", NuSock::ipStr(WiFi.gatewayIP()));
 
     // Register Event Callback
     ws.onEvent(onWebSocketEvent);
 
     // Configure WebSocket Client
-    ws.begin(&wifiClient, "echo.websocket.org", 80, "/");
+    char *host = "echo.websocket.org";
+    uint16_t port = 80;
+    const char *path = "/";
+    NuSock::printLog("WS  ", "Connecting to wss://%s:%d/\n", host, port);
 
-    // Initiate Connection
-    Serial.println("Connecting to WebSocket Server...");
-    if (ws.connect())
-    {
-        Serial.println("Connection request sent.");
-    }
+    if (wss.connect())
+        NuSock::printLog("WS  ", "Connection request sent.\n");
     else
-    {
-        Serial.println("Connection failed immediately.");
-    }
+        NuSock::printLog("WS  ", "Connection failed immediately.\n");
 }
 
 void loop()

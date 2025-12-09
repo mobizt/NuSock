@@ -85,8 +85,7 @@ private:
         NuSockClient *self = (NuSockClient *)arg;
 
 #if defined(NUSOCK_DEBUG)
-        Serial.print("[WS LwIP] Error Callback. Code: ");
-        Serial.println((int)err);
+        SNuSock::printLog("DBG ", "Error Callback. Code: %d\n", (int)err);
 #endif
 
         if (self && self->_internalClient)
@@ -122,7 +121,7 @@ private:
             return err;
 
 #if defined(NUSOCK_DEBUG)
-        Serial.println("[WS LwIP] TCP Connected! Sending Handshake...");
+        NuSock::printLog("DBG ", "TCP Connected! Sending Handshake...\n");
 #endif
 
         char keyBuf[32];
@@ -141,8 +140,7 @@ private:
         if (writeErr != ERR_OK)
         {
 #if defined(NUSOCK_DEBUG)
-            Serial.print("[WS LwIP] Handshake Write Failed: ");
-            Serial.println((int)writeErr);
+            NuSock::printLog("DBG ", "Handshake Write Failed: %d\n", (int)writeErr);
 #endif
             return writeErr;
         }
@@ -165,7 +163,7 @@ private:
         if (!p)
         {
 #if defined(NUSOCK_DEBUG)
-            Serial.println("[WS LwIP] Remote closed connection (FIN).");
+            NuSock::printLog("DBG ", "Remote closed connection (FIN).\n");
 #endif
 
             if (self->client_pcb)
@@ -228,7 +226,7 @@ private:
         if (!self->client_pcb)
         {
 #if defined(NUSOCK_DEBUG)
-            Serial.println("[WS LwIP] tcp_new failed!");
+            SNuSock::printLog("DBG ", "tcp_new failed!\n");
 #endif
             return;
         }
@@ -249,8 +247,7 @@ private:
         if (err != ERR_OK)
         {
 #if defined(NUSOCK_DEBUG)
-            Serial.print("[WS LwIP] Connect Call Failed: ");
-            Serial.println((int)err);
+            NuSock::printLog("DBG ", "Connect Call Failed: %d\n", (int)err);
 #endif
             // If connect fails immediately, we must close
             tcp_arg(self->client_pcb, nullptr);
@@ -274,14 +271,13 @@ private:
                     _internalClient->rxBuffer[MAX_WS_BUFFER - 1] = 0;
 
 #if defined(NUSOCK_DEBUG)
-// Serial.println("[WS LwIP] Handshake Response:");
-// Serial.println((char*)_internalClient->rxBuffer);
+// NuSock::printLog("DBG ","Handshake Response: %s\n",(char*)_internalClient->rxBuffer);
 #endif
 
                 if (strstr((char *)_internalClient->rxBuffer, "101 Switching Protocols"))
                 {
 #if defined(NUSOCK_DEBUG)
-                    Serial.println("[WS LwIP] Handshake Successful (101).");
+                    NuSock::printLog("DBG ", "Handshake Successful (101).\n");
 #endif
                     _internalClient->state = NuClient::STATE_CONNECTED;
                     _internalClient->rxLen = 0;
@@ -457,7 +453,7 @@ private:
                     if (_onEvent)
                     {
 #if defined(NUSOCK_DEBUG)
-                        Serial.println("[WS Debug] Error: Bad Status");
+                        NuSock::printLog("DBG ", "Error: Bad Status\n");
 #endif
                         char errBuf[128];
                         snprintf(errBuf, sizeof(errBuf), "Bad Status: %.110s", lineBuf);
@@ -495,7 +491,7 @@ private:
                 else
                 {
 #if defined(NUSOCK_DEBUG)
-                    Serial.println("[WS Debug] Error: Missing Headers");
+                    NuSock::printLog("DBG ", "Error: Missing Headers\n");
 #endif
                     if (_onEvent)
                         _onEvent(_internalClient, CLIENT_EVENT_ERROR, (const uint8_t *)"Missing Headers", 15);
@@ -629,14 +625,13 @@ public:
 #endif
 
 #if defined(NUSOCK_DEBUG)
-            Serial.print("[WS LwIP] Target IP: ");
-            Serial.println(ip);
+            NuSock::printLog("DBG ", "Target IP: %s\n", NuSock::ipStr(ip));
 #endif
         }
         else
         {
 #if defined(NUSOCK_DEBUG)
-            Serial.println("[WS LwIP] DNS Failed.");
+            NuSock::printLog("DBG ", "Error: DNS Failed.\n");
 #endif
         }
     }
@@ -661,7 +656,7 @@ public:
 #endif
         {
 #if defined(NUSOCK_DEBUG)
-            Serial.println("[WS LwIP] Error: Invalid IP (0.0.0.0)");
+            NuSock::printLog("DBG ", "Error: Invalid IP (0.0.0.0)\n");
 #endif
             return false;
         }

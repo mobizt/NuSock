@@ -53,30 +53,32 @@
 #include "NuSock.h"
 
 // REPLACE WITH YOUR CONTENTS FROM keygen.py OUTPUT
-const char *server_cert =
-    "-----BEGIN CERTIFICATE-----\n"
-    "MIIDrjCCApagAwIBAgIUJ+...\n"
-    "...\n"
-    "YOUR_BASE64_CERT_DATA_HERE\n"
-    "...\n"
-    "-----END CERTIFICATE-----\n";
+const char *server_cert = "-----BEGIN CERTIFICATE-----\n...";
+const char *server_key = "-----BEGIN PRIVATE KEY-----\n...";
 
-const char *server_key =
-    "-----BEGIN PRIVATE KEY-----\n"
-    "MIIEvgIBADANBgkqhkiG9w0B...\n"
-    "...\n"
-    "YOUR_BASE64_KEY_DATA_HERE\n"
-    "...\n"
-    "-----END PRIVATE KEY-----\n";
-
-const char *ssid = "YourSSID";
-const char *password = "YourPassword";
+const char *ssid = "SSID";
+const char *password = "Password";
+const uint16_t port = 443;
 
 #if defined(ESP32)
+
+// In ESP32, we use NuSockServerSecure for this reason.
+
+// 1. Proper Server SSL Support: It provides a WebSocket Server
+// with SSL/TLS support by using the native ESP-IDF esp_tls API.
+
+// 2. Overcomes Library Limitations: It explicitly addresses
+// a limitation in the standard library, noting that
+// it doesn't rely on WiFiClientSecure because that class
+// "doesn't support server mode properly".
+// This allows you to host a secure WSS server directly on the ESP32,
+// which is often difficult with standard Arduino libraries.
+
 NuSockServerSecure wss;
+
 #elif defined(ESP8266) || defined(ARDUINO_RASPBERRY_PI_PICO_W)
 NuSockServer wss;
-WiFiServerSecure server(443);
+WiFiServerSecure server(port);
 #endif
 
 void onWebSocketEvent(NuClient *client, NuServerEvent event, const uint8_t *payload, size_t len)
@@ -84,26 +86,26 @@ void onWebSocketEvent(NuClient *client, NuServerEvent event, const uint8_t *payl
     switch (event)
     {
     case SERVER_EVENT_CONNECT:
-        Serial.println("[WSS] WebSocket Server Started.");
+        NuSock::printLog("WS  ", "WebSocket Server Started.\n");
         break;
 
     case SERVER_EVENT_CLIENT_HANDSHAKE:
-        NuSock::printf("[WSS][%d] Client sent handshake.\n", client->index);
+        NuSock::printLog("WS  ", "[%d] Client sent handshake.\n", client->index);
         break;
 
     case SERVER_EVENT_CLIENT_CONNECTED:
-        NuSock::printf("[WSS][%d] Client handshake successful - WS OPEN!\n", client->index);
+        NuSock::printLog("WS  ", "[%d] Client handshake successful.\n", client->index);
         // Optionally send a welcome message
         wss.send(client->index, "Welcome!");
         break;
 
     case SERVER_EVENT_CLIENT_DISCONNECTED:
-        NuSock::printf("[WSS][%d] Client disconnected.\n", client->index);
+        NuSock::printLog("WS  ", "[%d] Client disconnected.\n", client->index);
         break;
 
     case SERVER_EVENT_MESSAGE_TEXT:
     {
-        NuSock::printf("[WSS][%d] Received Text: ", client->index);
+        NuSock::printLog("WS  ", "[%d] Received Text: ", client->index);
         for (size_t i = 0; i < len; i++)
             Serial.print((char)payload[i]);
         Serial.println();
@@ -119,11 +121,11 @@ void onWebSocketEvent(NuClient *client, NuServerEvent event, const uint8_t *payl
     break;
 
     case SERVER_EVENT_MESSAGE_BINARY:
-        NuSock::printf("[WSS][%d] Received Binary: %d bytes\n", client->index, len);
+        NuSock::printLog("WS  ", "[%d] Received Binary: %d bytes\n", client->index, len);
         break;
 
     case SERVER_EVENT_ERROR:
-        NuSock::printf("[WSS][%d] Error: %s\n", client->index, payload ? (const char *)payload : "Unknown");
+        NuSock::printLog("WS  ", "[%d] Error: %s\n", client->index, payload ? (const char *)payload : "Unknown");
         break;
 
     default:
@@ -139,21 +141,33 @@ BearSSL::PrivateKey key(server_key);
 void setup()
 {
     Serial.begin(115200);
-    delay(1000);
+    while (!Serial)
+        ; // Wait for serial
+
+    delay(3000);
+
+    Serial.println();
+
+    NuSock::printLog("INFO", "NuSock WSS Server v%s Booting\n", NUSOCK_VERSIOn_STR);
 
     // Connect to WiFi
-    Serial.print("Connecting to WiFi");
+    NuSock::printLog("NET ", "Connecting to WiFi (%s)...\n", ssid);
     WiFi.begin(ssid, password);
 
     while (WiFi.status() != WL_CONNECTED)
     {
-        delay(200);
-        Serial.print(".");
+        delay(500);
     }
 
-    Serial.println(" Connected!");
-    Serial.print("IP Address: ");
-    NuSock::printIP(WiFi.localIP());
+    // Waits until we got the IP
+    while (WiFi.localIP() == (IPAddress)INADDR_NONE)
+        ;
+
+    NuSock::printLog("NET ", "WiFi Connected (%s)\n", NuSock::ipStr(WiFi.localIP()));
+    NuSock::printLog("NET ", "Gateway: %s\n", NuSock::ipStr(WiFi.gatewayIP()));
+    NuSock::printLog("WARN", "Using self-signed certificate\n");
+    NuSock::printLog("WS  ", "Server started on port %d\n", port);
+    NuSock::printLog("WS  ", "Ready: wss://%s\n", NuSock::ipStr(WiFi.localIP()));
 
     wss.onEvent(onWebSocketEvent);
 
@@ -161,14 +175,12 @@ void setup()
     server.setRSACert(&cert, &key);
 #endif
 
-    Serial.println("Starting Secure WebSocket Server...");
-
 // Start secure WebSocket server
 #if defined(ESP32)
-    wss.begin(443, server_cert, server_key);
+    wss.begin(port, server_cert, server_key);
 #elif defined(ESP8266) || defined(ARDUINO_RASPBERRY_PI_PICO_W)
-    server.begin(443);
-    wss.begin(&server, 443);
+    server.begin(port);
+    wss.begin(&server, port);
 #endif
 }
 

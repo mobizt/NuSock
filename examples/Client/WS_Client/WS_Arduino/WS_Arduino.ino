@@ -92,7 +92,7 @@ void setup()
 
     Serial.println();
 
-    NuSock::printLog("INFO", "NuSock WS Client v%s Booting", NUSOCK_VERSIOn_STR);
+    NuSock::printLog("INFO", "NuSock WS Client v%s Booting", NUSOCK_VERSION_STR);
 
     // Connect to WiFi
     NuSock::printLog("NET ", "Connecting to WiFi (%s)...", ssid);

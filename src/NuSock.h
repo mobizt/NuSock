@@ -12,7 +12,7 @@
 #define NUSOCK_VERSION_MAJOR 1
 #define NUSOCK_VERSION_MINOR 0
 #define NUSOCK_VERSION_PATCH 5
-#define NUSOCK_VERSIOn_STR "1.0.5"
+#define NUSOCK_VERSION_STR "1.0.5"
 
 class NuSock
 {

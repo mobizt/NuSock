@@ -569,7 +569,11 @@ public:
 // PLATFORM ADAPTIVE ACCEPT
 // Use accept() for UNO R4 (S3), NINA, ESP, RP2040.
 // Exclude SAMD MKR1000 specifically (WiFi101 doesn't support accept).
-#if (defined(ARDUINO_ARCH_SAMD) && !defined(ARDUINO_SAMD_MKR1000)) || defined(ARDUINO_SAMD_MKRWIFI1010) || defined(ARDUINO_NANO_33_IOT) || defined(ARDUINO_ARCH_RP2040) || defined(ESP32) || defined(ESP8266) || defined(ARDUINO_UNOR4_WIFI)
+#if (defined(ARDUINO_ARCH_SAMD) && !defined(ARDUINO_SAMD_MKR1000)) ||     \
+    defined(ARDUINO_AVR_UNO_WIFI_REV2) || defined(__AVR_ATmega4809__) ||  \
+    defined(ARDUINO_SAMD_MKRWIFI1010) || defined(ARDUINO_NANO_33_IOT) ||  \
+    defined(ARDUINO_ARCH_RP2040) || defined(ESP32) || defined(ESP8266) || \
+    defined(ARDUINO_UNOR4_WIFI)
             auto c = srv->accept();
 #else
             auto c = srv->available();
@@ -590,11 +594,11 @@ public:
         // DOUBLE BEGIN CHECK
         // Only call begin() if server is not already running.
         // MKR1000 (WiFi101) does not support operator bool(), so we skip check there.
-#if defined(ARDUINO_SAMD_MKRWIFI1010) || defined(ARDUINO_NANO_33_IOT) || defined(ARDUINO_UNOR4_WIFI)
+#if defined(ARDUINO_AVR_UNO_WIFI_REV2) || defined(__AVR_ATmega4809__) || \
+    defined(ARDUINO_SAMD_MKRWIFI1010) || defined(ARDUINO_NANO_33_IOT) || \
+    defined(ARDUINO_UNOR4_WIFI)
         if (!(*server))
-        {
             server->begin();
-        }
 #else
         server->begin();
 #endif

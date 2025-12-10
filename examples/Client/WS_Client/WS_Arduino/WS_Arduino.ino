@@ -17,7 +17,7 @@
 
 #include <Arduino.h>
 // For Arduino MKR WiFi 1010, Nano 33 IoT,
-// Arduino MKR VIDOR 4000, Arduino Uno WiFi Rev.2
+// Arduino MKR VIDOR 4000, Arduino UNO WiFi Rev.2
 #include <WiFiNINA.h>
 
 // For Arduino MKR1000 WiFi
@@ -57,7 +57,7 @@ void onWebSocketEvent(NuClient *client, NuClientEvent event, const uint8_t *payl
     case CLIENT_EVENT_CONNECTED:
         NuSock::printLog("WS  ", "Connected to server!");
         // Send a message immediately upon connection
-        wss.send("Hello from WS Client");
+        ws.send("Hello from WS Client");
         break;
 
     case CLIENT_EVENT_DISCONNECTED:
@@ -83,7 +83,7 @@ void onWebSocketEvent(NuClient *client, NuClientEvent event, const uint8_t *payl
 
 void setup()
 {
-
+    // The baud rate for UNO WiFi Rev 2 should not exceed 57600
     Serial.begin(115200);
     while (!Serial)
         ; // Wait for serial
@@ -113,9 +113,9 @@ void setup()
     char *host = "echo.websocket.org";
     uint16_t port = 80;
     const char *path = "/";
-    NuSock::printLog("WS  ", "Connecting to wss://%s:%d/\n", host, port);
+    NuSock::printLog("WS  ", "Connecting to ws://%s:%d/\n", host, port);
 
-    if (wss.connect())
+    if (ws.connect())
         NuSock::printLog("WS  ", "Connection request sent.\n");
     else
         NuSock::printLog("WS  ", "Connection failed immediately.\n");

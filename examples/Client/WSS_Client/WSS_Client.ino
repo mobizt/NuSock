@@ -23,7 +23,7 @@
 // These WiFi libraries may require the server SSL certificate
 // to be uploaded via the Arduino IDE.
 // For Arduino MKR WiFi 1010, Nano 33 IoT,
-// Arduino MKR VIDOR 4000, Arduino Uno WiFi Rev.2
+// Arduino MKR VIDOR 4000, Arduino UNO WiFi Rev.2
 #include <WiFiNINA.h>
 
 // For Arduino MKR1000 WiFi
@@ -103,7 +103,7 @@ void onWebSocketEvent(NuClient *client, NuClientEvent event, const uint8_t *payl
 
 void setup()
 {
-
+    // The baud rate for UNO WiFi Rev 2 should not exceed 57600
     Serial.begin(115200);
     while (!Serial)
         ; // Wait for serial

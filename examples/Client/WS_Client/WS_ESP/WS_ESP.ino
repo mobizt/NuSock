@@ -54,7 +54,7 @@ void onWebSocketEvent(NuClient *client, NuClientEvent event, const uint8_t *payl
     case CLIENT_EVENT_CONNECTED:
         NuSock::printLog("WS  ", "Connected to server!\n");
         // Send a message immediately upon connection
-        wss.send("Hello from WS Client");
+        ws.send("Hello from WS Client");
         break;
 
     case CLIENT_EVENT_DISCONNECTED:
@@ -110,7 +110,7 @@ void setup()
     char *host = "echo.websocket.org";
     uint16_t port = 80;
     const char *path = "/";
-    NuSock::printLog("WS  ", "Connecting to wss://%s:%d/\n", host, port);
+    NuSock::printLog("WS  ", "Connecting to ws://%s:%d/\n", host, port);
 
 #ifdef NUSOCK_CLIENT_USE_LWIP
     ws.begin(host, port, path);

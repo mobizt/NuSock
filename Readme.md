@@ -1,12 +1,12 @@
 # NuSock
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
-![Platform](https://img.shields.io/badge/platform-ESP32%20%7C%20ESP8266%20%7C%20RP2040%20%7C%20SAMD%20%7C%20Renesas-orange.svg)
-![Version](https://img.shields.io/badge/version-1.0.5-green.svg)
+![Platform](https://img.shields.io/badge/platform-ESP32%20%7C%20ESP8266%20%7C%20RP2040%20%7C%20SAMD%20%7C%20Renesas%20%7C%20AVR-orange.svg)
+![Version](https://img.shields.io/badge/version-1.0.6-green.svg)
 
 **NuSock** is a lightweight, high-performance WebSocket library designed for embedded systems. It bridges the gap between ease of use and raw performance by offering a **Dual-Mode Architecture** (Generic vs LwIP) and **Secure WebSocket (WSS)** support.
 
-It features a **Zero-Interrupt Architecture** for Generic mode, ensuring stability on UART-based WiFi modules like the **Arduino UNO R4 WiFi** and **Nano 33 IoT**.
+It features a **Zero-Interrupt Architecture** for Generic mode, ensuring stability on UART-based WiFi modules like the **Arduino UNO R4 WiFi**, **Nano 33 IoT**, and **Uno WiFi Rev2**.
 
 ---
 
@@ -19,7 +19,7 @@ It features a **Zero-Interrupt Architecture** for Generic mode, ensuring stabili
     - [1. Secure Server (ESP32 Native)](#1-secure-websocket-server-wss-esp32-native)
     - [2. Secure Server (ESP8266 / Pico W - Wrapper)](#2-secure-websocket-server-wss-esp8266--pico-w---wrapper)
     - [3. Standard Server (ESP32/ESP8266 - LwIP Mode)](#3-standard-server-esp32esp8266---lwip-mode)
-    - [4. Standard Server (Uno R4 / MKR / Nano - Generic Mode)](#4-standard-server-uno-r4--mkr--nano---generic-mode)
+    - [4. Standard Server (Uno R4 / MKR / Nano / Rev2 - Generic Mode)](#4-standard-server-uno-r4--mkr--nano--rev2---generic-mode)
     - [5. Secure Client (ESP32 Native)](#5-secure-websocket-client-wss-esp32-native)
     - [6. Generic Client (WS/WSS)](#6-generic-websocket-client-wswss)
 - [License](#-license)
@@ -35,7 +35,7 @@ It features a **Zero-Interrupt Architecture** for Generic mode, ensuring stabili
     * **Generic Mode:** Maximum compatibility using standard `WiFiServer` / `WiFiClient` wrapping. Supports **accept()** logic for robust connection handling on newer boards.
     * **LwIP Mode:** High-performance, low-overhead mode using native LwIP callbacks (ESP32/ESP8266).
 * **🛡️ Robust Stability:**
-    * **Zero-Interrupt Locking:** Prevents UART deadlocks on Arduino Uno R4 WiFi and Nano 33 IoT.
+    * **Zero-Interrupt Locking:** Prevents UART deadlocks on Arduino Uno R4 WiFi, Nano 33 IoT, and Uno WiFi Rev2.
     * **Smart Duplicate Detection:** Automatically handles and cleans up duplicate socket handles returned by underlying WiFi libraries.
 * **📨 Event-Driven:** Non-blocking, callback-based architecture for handling Connect, Disconnect, Text, and Binary events.
 
@@ -49,12 +49,13 @@ It features a **Zero-Interrupt Architecture** for Generic mode, ensuring stabili
 | **ESP8266** | ✅ | ✅ | ✅ | ✅ | LwIP / Generic |
 | **RP2040 (Pico W)** | ✅ | ✅ | ✅ | ✅ | Generic |
 | **Arduino UNO R4 WiFi** | ✅ | ❌ | ✅ | ✅ | Generic |
+| **Arduino UNO WiFi Rev2** | ✅ | ❌ | ✅ | ✅ | Generic |
 | **SAMD (MKR / Nano 33)**| ✅ | ❌ | ✅ | ✅ | Generic |
 
 ### 📝 Platform Notes
 * **ESP8266 / Pico W:** 
   * WSS Server requires passing a `WiFiServerSecure` instance to `begin()`.
-* **Arduino R4 / SAMD:** 
+* **Arduino R4 / SAMD / AVR (Rev2):** 
   * WS Server requires passing a `WiFiServer` instance.
   * WSS Client requires Root CA certificates to be uploaded via the Arduino IDE (Tools > WiFi101 / WiFiNINA Firmware Updater).
 
@@ -173,11 +174,12 @@ void loop() {
 }
 ```
 
-### 4. Standard Server (Uno R4 / MKR / Nano - Generic Mode)
-Compatible with **Arduino Uno R4 WiFi**, **Nano 33 IoT**, **MKR 1010**, etc. NuSock wraps the existing `WiFiServer` object.
+### 4. Standard Server (Uno R4 / MKR / Nano / Rev2 - Generic Mode)
+Compatible with **Arduino Uno R4 WiFi**, **Nano 33 IoT**, **MKR 1010**, **Uno WiFi Rev2**, etc. NuSock wraps the existing `WiFiServer` object.
 
 ```cpp
-#include <WiFiS3.h> // Or WiFiNINA.h
+#include <WiFiS3.h> // For R4
+// #include <WiFiNINA.h> // For Nano 33 IoT / Uno WiFi Rev2
 #include "NuSock.h"
 
 // 1. Create the standard WiFiServer
@@ -228,7 +230,7 @@ void loop() {
 ```
 
 ### 6. Generic WebSocket Client (WS/WSS)
-Compatible with `WiFiClient`, `WiFiClientSecure`, or `EthernetClient`. Works on all platforms (Uno R4, MKR, ESP8266, etc.).
+Compatible with `WiFiClient`, `WiFiClientSecure`, or `EthernetClient`. Works on all platforms (Uno R4, MKR, ESP8266, Rev2, etc.).
 
 ```cpp
 #include <WiFiClientSecure.h>

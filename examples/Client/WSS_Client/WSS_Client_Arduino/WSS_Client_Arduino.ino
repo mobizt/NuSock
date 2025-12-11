@@ -9,28 +9,34 @@
 
 #include <Arduino.h>
 
-#if defined(ESP32)
-#include <WiFi.h>
-#include <WiFiClientSecure.h>
-#elif defined(ESP8266)
-#include <ESP8266WiFi.h>
-#include <WiFiClientSecure.h>
-#elif defined(ARDUINO_RASPBERRY_PI_PICO_W)
-#include <WiFi.h>
-#include <WiFiClientSecure.h>
-#else
+// For Arduino MKR WiFi 1010, Nano 33 IoT, Arduino MKR VIDOR 4000, Arduino UNO WiFi Rev.2
+#if defined(ARDUINO_AVR_UNO_WIFI_REV2) || defined(__AVR_ATmega4809__) || \
+    defined(ARDUINO_SAMD_MKRWIFI1010) || defined(ARDUINO_NANO_33_IOT) || \
+    defined(ARDUINO_SAMD_MKRVIDOR4000)
 
-// These WiFi libraries may require the server SSL certificate
-// to be uploaded via the Arduino IDE.
-// For Arduino MKR WiFi 1010, Nano 33 IoT,
-// Arduino MKR VIDOR 4000, Arduino UNO WiFi Rev.2
 #include <WiFiNINA.h>
 
-// For Arduino MKR1000 WiFi
-// #include <WiFi101.h>
+// For Atduino MKR 1000 WIFI
+#elif defined(ARDUINO_SAMD_MKR1000)
 
-// For UNO R4 WiFi
-// #include <WiFiS3.h>
+#include <WiFi101.h>
+
+// For Atduino UNO R4 WiFi
+#elif defined(ARDUINO_UNOR4_WIFI)
+
+#include <WiFiS3.h>
+
+#elif defined(ARDUINO_PORTENTA_C33)
+#include <WiFiC3.h>
+
+#elif defined(ARDUINO_GIGA) || defined(ARDUINO_OPTA) || defined(ARDUINO_PORTENTA_H7_M7)
+
+#include <WiFi.h>
+
+#else
+
+#warning "For ESP32, please check the examples/Client/WSS_Client/WSS_Client_ESP32/WS_Client_ESP32.ino"
+#warning "For ESP8266/RP2040 (Pico W), please check the examples/Client/WSS_Client/WSS_Client_ESP8266_PicoW/WSS_Client_ESP8266_PicoW.ino"
 
 #endif
 
@@ -40,28 +46,11 @@
 const char *ssid = "SSID";
 const char *password = "Password";
 
-#if defined(ESP32)
-
-// In ESP32, we use NuSockClientSecure for this reason.
-
-// 1. Performance & Efficiency: It is designed to be a lightweight
-// and high-performance WSS (Secure WebSocket) client implementation.
-
-// 2. Direct Native Stack: It sits directly on top of the ESP-IDF esp_tls stack.
-// This allows it to avoid the overhead associated with the standard
-// Arduino WiFiClientSecure library, providing a more optimized connection.
-NuSockClientSecure wss;
-
-#elif defined(ESP8266) || defined(ARDUINO_RASPBERRY_PI_PICO_W)
-WiFiClientSecure wifiClient;
-NuSockClient wss;
-#else
 WiFiSSLClient wifiClient;
 NuSockClient wss;
-#endif
 
 // For easier usage, run "python pem_to_cpp.py"
-// and provide root CA certificate to get the text 
+// and provide root CA certificate to get the text
 // that is easier to use in code.
 const char *rootCA = "-----BEGIN CERTIFICATE-----\n...";
 

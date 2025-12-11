@@ -1,5 +1,5 @@
 /**
- * NuSock Secure WebSocket Server (WSS) ESP32/ESP8266/RPi Pico W Example
+ * NuSock Secure WebSocket Server (WSS) ESP8266 Example
  * This sketch demonstrates how to run a Secure WebSocket Server (WSS) on port 443
  * using the NuSock library with a Self-Signed Certificate.
  * =================================================================================
@@ -40,15 +40,7 @@
 // For internal debug message printing
 #define NUSOCK_DEBUG
 
-#if defined(ESP32)
-// Define this macro or build flag to use NuSockServerSecure class.
-#define NUSOCK_USE_SERVER_SECURE
-#include <WiFi.h>
-#elif defined(ESP8266)
 #include <ESP8266WiFi.h>
-#elif defined(ARDUINO_RASPBERRY_PI_PICO_W)
-#include <WiFi.h>
-#endif
 
 #include "NuSock.h"
 
@@ -60,26 +52,8 @@ const char *ssid = "SSID";
 const char *password = "Password";
 const uint16_t port = 443;
 
-#if defined(ESP32)
-
-// In ESP32, we use NuSockServerSecure for this reason.
-
-// 1. Proper Server SSL Support: It provides a WebSocket Server
-// with SSL/TLS support by using the native ESP-IDF esp_tls API.
-
-// 2. Overcomes Library Limitations: It explicitly addresses
-// a limitation in the standard library, noting that
-// it doesn't rely on WiFiClientSecure because that class
-// "doesn't support server mode properly".
-// This allows you to host a secure WSS server directly on the ESP32,
-// which is often difficult with standard Arduino libraries.
-
-NuSockServerSecure wss;
-
-#elif defined(ESP8266) || defined(ARDUINO_RASPBERRY_PI_PICO_W)
 NuSockServer wss;
 WiFiServerSecure server(port);
-#endif
 
 void onWebSocketEvent(NuClient *client, NuServerEvent event, const uint8_t *payload, size_t len)
 {
@@ -133,10 +107,8 @@ void onWebSocketEvent(NuClient *client, NuServerEvent event, const uint8_t *payl
     }
 }
 
-#if defined(ESP8266) || defined(ARDUINO_RASPBERRY_PI_PICO_W)
 BearSSL::X509List cert(server_cert);
 BearSSL::PrivateKey key(server_key);
-#endif
 
 void setup()
 {
@@ -171,17 +143,11 @@ void setup()
 
     wss.onEvent(onWebSocketEvent);
 
-#if defined(ESP8266) || defined(ARDUINO_RASPBERRY_PI_PICO_W)
     server.setRSACert(&cert, &key);
-#endif
 
-// Start secure WebSocket server
-#if defined(ESP32)
-    wss.begin(port, server_cert, server_key);
-#elif defined(ESP8266) || defined(ARDUINO_RASPBERRY_PI_PICO_W)
+    // Start secure WebSocket server
     server.begin(port);
     wss.begin(&server, port);
-#endif
 }
 
 void loop()

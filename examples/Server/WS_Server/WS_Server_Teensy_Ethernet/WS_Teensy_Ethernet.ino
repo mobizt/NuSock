@@ -1,49 +1,35 @@
 /**
- * NuSock WebSocket Server (WS) Arduino device Example
- * This sketch demonstrates how to run a WebSocket Server (WS) on port 80
+ * NuSock WebSocket Client (WS) Teensy 4.0 Example
+ * This sketch demonstrates how to run a WebSocket Client (WS) on port 80
  * using the NuSock library
- * =================================================================================
- * STEP 1: HOW TO TEST
- * =================================================================================
- * Ensure your PC and Arduino are on the same Wi-Fi network.
  *
- * * OPTION A: Python Client (Easiest)
- * ---------------------------------
- * 1. Open 'test_client.py'.
- * 2. Update the 'DEVICE_IP' variable.
- * 3. Run the script. It is pre-configured to ignore SSL warnings.
+ * Most websocket servers reject the connection via non-SSL port e.g echo.websocket.org.
  *
- * * OPTION B: Web Browser Client (Critical Manual Step)
- * ---------------------------------------------------
- * 1. Open 'test_client.html', enter the IP, and click Connect.
- * * =================================================================================
+ * For this reason, please runnning websocket server on your PC by running
+ * the python script simple_server.py or running run.bat or run.sh.
+ *
+ * To test python script websocket server,
+ * your PC should connect to the same network as your Arduino devices.
  */
 
 // For internal debug message printing
 #define NUSOCK_DEBUG
 
 #include <Arduino.h>
-// For Arduino MKR WiFi 1010, Nano 33 IoT, Arduino MKR VIDOR 4000, Arduino UNO WiFi Rev.2
-#include <WiFiNINA.h>
-
-// For Arduino MKR1000 WiFi
-// #include <WiFi101.h>
-
-// For UNO R4 WiFi
-// #include <WiFiS3.h>
-
-// For Raspberry Pi Pico W
-// #include <WiFi.h>
+// paulstoffregen/Ethernet
+#include <Ethernet.h>
 
 #include <NuSock.h>
 
-const char *ssid = "SSID";
-const char *password = "Password";
-const uint16_t port = 80;
+int port = 80;
+byte mac[] = {0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xAA};
 
-// Use EthernetServer for STM32, Teensy and other Arduino boards.
+// W5500 - Teensy 4.0 Connection:
+// MOSI -> 11, MISO -> 12, SCK -> 13, CS -> 10, RST -> 9
+uint8_t csPin = 10;
+uint8_t rstPin = 9;
 
-WiFiServer server(port); // External Server required for Generic Mode
+EthernetServer server(80);
 NuSockServer ws;
 
 void onWebSocketEvent(NuClient *client, NuServerEvent event, const uint8_t *payload, size_t len)
@@ -100,40 +86,43 @@ void onWebSocketEvent(NuClient *client, NuServerEvent event, const uint8_t *payl
 
 void setup()
 {
-    // The baud rate for UNO WiFi Rev 2 should not exceed 57600
     Serial.begin(115200);
     while (!Serial)
         ; // Wait for serial
 
-    delay(3000);
-
     Serial.println();
 
-    NuSock::printLog("INFO", "NuSock WS Server v%s Booting\n", NUSOCK_VERSION_STR);
+    NuSock::printLog("INFO", "NuSock WS Client v%s Booting\n", NUSOCK_VERSION_STR);
 
-    // Connect to WiFi
-    NuSock::printLog("NET ", "Connecting to WiFi (%s)...\n", ssid);
-    WiFi.begin(ssid, password);
+    pinMode(rstPin, OUTPUT);
+    digitalWrite(rstPin, HIGH);
 
-    while (WiFi.status() != WL_CONNECTED)
+    // Reset W5500 module
+    NuSock::printLog("INFO", "Resetting W5500 module...\n");
+    digitalWrite(rstPin, LOW);
+    delay(1);
+    digitalWrite(rstPin, HIGH);
+    delay(150);
+
+    NuSock::printLog("NET", "Connecting to Ethernet...\n");
+
+    if (Ethernet.begin(mac) == 0)
     {
-        delay(500);
+        NuSock::printLog("NET", "Error: DHCP Failed.\n");
+        while (1)
+            ;
     }
 
-    // Waits until we got the IP
-    while (WiFi.localIP() == (IPAddress)INADDR_NONE)
-        ;
-
-    NuSock::printLog("NET ", "WiFi Connected (%s)\n", NuSock::ipStr(WiFi.localIP()));
-    NuSock::printLog("NET ", "Gateway: %s\n", NuSock::ipStr(WiFi.gatewayIP()));
+    NuSock::printLog("NET ", "Ethernet Connected (%s)\n", NuSock::ipStr(Ethernet.localIP()));
+    NuSock::printLog("NET ", "Gateway: %s\n", NuSock::ipStr(Ethernet.gatewayIP()));
     NuSock::printLog("WS  ", "Server started on port %d\n", port);
-    NuSock::printLog("WS  ", "Ready: ws://%s\n", NuSock::ipStr(WiFi.localIP()));
+    NuSock::printLog("WS  ", "Ready: ws://%s\n", NuSock::ipStr(Ethernet.localIP()));
 
     ws.onEvent(onWebSocketEvent);
 
     // Start Server
-    server.begin();          // Start the underlying server
-    ws.begin(&server, port); // Generic Mode: Pass server reference and port
+    server.begin();        // Start the underlying server
+    ws.begin(&server, 80); // Generic Mode: Pass server reference and port
 }
 
 void loop()

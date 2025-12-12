@@ -26,6 +26,9 @@ enum NuServerEvent
     SERVER_EVENT_CLIENT_DISCONNECTED, // Client Closed
     SERVER_EVENT_MESSAGE_TEXT,        // Text Frame
     SERVER_EVENT_MESSAGE_BINARY,      // Binary Frame
+    SERVER_EVENT_FRAGMENT_START,      // First chunk of a fragmented message (FIN=0, Opcode > 0)
+    SERVER_EVENT_FRAGMENT_CONT,       // Middle chunk (FIN=0, Opcode=0)
+    SERVER_EVENT_FRAGMENT_FIN,        // Last chunk (FIN=1, Opcode=0)
     SERVER_EVENT_ERROR                // Error
 };
 
@@ -39,6 +42,9 @@ enum NuClientEvent
     CLIENT_EVENT_DISCONNECTED,
     CLIENT_EVENT_MESSAGE_TEXT,
     CLIENT_EVENT_MESSAGE_BINARY,
+    CLIENT_EVENT_FRAGMENT_START,
+    CLIENT_EVENT_FRAGMENT_CONT,
+    CLIENT_EVENT_FRAGMENT_FIN,
     CLIENT_EVENT_ERROR
 };
 
@@ -70,11 +76,19 @@ struct NuClient
     size_t txLen;
     size_t txCap;
 
+    // Stores the opcode of the FIRST fragment (1=Text, 2=Binary)
+    // 0 = No active fragmentation
+    uint8_t fragmentOpcode = 0;
+
+    // UTF-8 Validation State (0 = Accept)
+    uint32_t utf8State = 0; // 0 = NuUTF8::UTF8_ACCEPT
+
     enum State
     {
         STATE_SSL_HANDSHAKE,
         STATE_HANDSHAKE,
-        STATE_CONNECTED
+        STATE_CONNECTED,
+        STATE_CLOSING
     };
     State state;
 

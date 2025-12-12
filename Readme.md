@@ -2,7 +2,7 @@
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-ESP32%20%7C%20ESP8266%20%7C%20RP2040%20%7C%20SAMD%20%7C%20Renesas%20%7C%20Portenta%20%7C%20Giga%20%7C%20Opta%20%7C%20AVR-orange.svg)
-![Version](https://img.shields.io/badge/version-1.0.7-green.svg)
+![Version](https://img.shields.io/badge/version-2.0.0-green.svg)
 
 **NuSock** is a lightweight, high-performance WebSocket library designed for embedded systems. It bridges the gap between ease of use and raw performance by offering a **Dual-Mode Architecture** (Generic vs LwIP) and **Secure WebSocket (WSS)** support.
 
@@ -15,13 +15,16 @@ It features a **Zero-Interrupt Architecture** for Generic mode, ensuring stabili
 - [Supported Platforms](#-supported-platforms)
 - [Installation](#-installation)
 - [Configuration Macros](#-configuration-macros)
+- [RFC 6455 Compliance](#-rfc-6455-compliance-macros)
 - [Usage Guide](#-usage-guide)
     - [1. Secure Server (ESP32 Native)](#1-secure-websocket-server-wss-esp32-native)
-    - [2. Secure Server (ESP8266 / Pico W - Wrapper)](#2-secure-websocket-server-wss-esp8266--pico-w---wrapper)
-    - [3. Standard Server (ESP32/ESP8266 - LwIP Mode)](#3-standard-server-esp32esp8266---lwip-mode)
-    - [4. Standard Server (Uno R4 / Portenta / Giga / MKR - Generic Mode)](#4-standard-server-uno-r4--portenta--giga--mkr---generic-mode)
-    - [5. Secure Client (ESP32 Native)](#5-secure-websocket-client-wss-esp32-native)
-    - [6. Generic Client (WS/WSS)](#6-generic-websocket-client-wswss)
+    - [2. Standard Server (LwIP Mode)](#2-standard-server-esp32esp8266---lwip-mode)
+    - [3. Standard Server (Generic Mode)](#3-standard-server-uno-r4--portenta--giga--mkr---generic-mode)
+    - [4. Secure Client (ESP32 Native)](#4-secure-websocket-client-wss-esp32-native)
+    - [5. Generic Client (WS/WSS)](#5-generic-websocket-client-wswss)
+- [Advanced Features](#-advanced-features)
+    - [Sending Fragmented Data](#sending-fragmented-data-streaming)
+    - [Graceful Disconnect](#graceful-disconnect-close-handshake)
 - [License](#-license)
 
 ---
@@ -34,10 +37,14 @@ It features a **Zero-Interrupt Architecture** for Generic mode, ensuring stabili
 * **⚡ Dual-Mode Architecture:**
     * **Generic Mode:** Maximum compatibility using standard `WiFiServer` / `WiFiClient` wrapping. Supports **accept()** logic for robust connection handling on newer boards.
     * **LwIP Mode:** High-performance, low-overhead mode using native LwIP callbacks (ESP32/ESP8266).
+* **📜 RFC 6455 Compliance:**
+    * **Fragmentation:** Supports sending and receiving large messages via streaming fragments.
+    * **Close Handshake:** Supports graceful shutdowns with status codes and reasoning.
+    * **Strict Mode:** Optional strict UTF-8 validation and Masking enforcement for enterprise environments.
 * **🛡️ Robust Stability:**
     * **Zero-Interrupt Locking:** Prevents UART deadlocks on Arduino Uno R4 WiFi, Nano 33 IoT, Portenta C33, and Uno WiFi Rev2.
     * **Smart Duplicate Detection:** Automatically handles and cleans up duplicate socket handles returned by underlying WiFi libraries.
-* **📨 Event-Driven:** Non-blocking, callback-based architecture for handling Connect, Disconnect, Text, and Binary events.
+* **📨 Event-Driven:** Non-blocking, callback-based architecture for handling Connect, Disconnect, Text, Binary, and Fragment events.
 
 ---
 
@@ -56,6 +63,8 @@ It features a **Zero-Interrupt Architecture** for Generic mode, ensuring stabili
 | **STM32**| ✅ | ❌ | ✅ | ✅ | Generic |
 | **AVR**| ✅ | ❌ | ✅ | ✅ | Generic |
 
+---
+
 ### 📝 Platform Notes
 * **ESP8266 / Pico W:** 
   * WSS Server requires passing a `WiFiServerSecure` instance to `begin()`.
@@ -67,7 +76,6 @@ It features a **Zero-Interrupt Architecture** for Generic mode, ensuring stabili
   * WSS Client requires Root CA certificates to be uploaded via the Firmware Updater tool where applicable.
 * **STM32 / AVR (Ethernet):** * Requires passing `EthernetClient` or `EthernetServer` instances.
 
----
 
 ## 📦 Installation
 
@@ -88,13 +96,24 @@ lib_deps =
 
 ## ⚙️ Configuration Macros
 
-Define these macros **before** including `NuSock.h` to enable high-performance modes.
+Define these macros **before** including `NuSock.h` to enable specific modes.
 
 | Macro | Description | Target |
 | :--- | :--- | :--- |
 | `NUSOCK_SERVER_USE_LWIP` | Enables LwIP async mode for **Server**. Reduces RAM/CPU overhead. | ESP32, ESP8266 |
 | `NUSOCK_CLIENT_USE_LWIP` | Enables LwIP async mode for **Client** (Plain WS). | ESP32, ESP8266 |
 | `NUSOCK_USE_SERVER_SECURE` | Enables `NuSockServerSecure` class (Native SSL). | ESP32 |
+
+### 📜 RFC 6455 Compliance Macros
+Use these to enable strict protocol features.
+
+| Macro | Description |
+| :--- | :--- |
+| `NUSOCK_FULL_COMPLIANCE` | **Enables All** features below. |
+| `NUSOCK_RFC_FRAGMENTATION` | Enables processing of fragmented messages (Streaming). |
+| `NUSOCK_RFC_CLOSE_HANDSHAKE` | Enables strict Close Handshake (Echoing & State Machine). |
+| `NUSOCK_RFC_STRICT_MASK_RSV` | Enforces strict Masking (Client->Server) and RSV bit checks. |
+| `NUSOCK_RFC_UTF8_STRICT` | Enforces strict UTF-8 validation on Text Frames. |
 
 ---
 
@@ -116,7 +135,7 @@ NuSockServerSecure wss;
 
 void setup() {
     WiFi.begin("SSID", "PASS");
-    // ... wait for connection ...
+    // wait for connection
     
     wss.onEvent(onEvent); // Define callback
     wss.begin(443, server_cert, server_key);
@@ -127,39 +146,7 @@ void loop() {
 }
 ```
 
-### 2. Secure WebSocket Server (WSS) [ESP8266 / Pico W - Wrapper]
-ESP8266 and RPi Pico W use the Generic Mode to wrap their native `WiFiServerSecure`.
-
-```cpp
-#include <WiFi.h> // or ESP8266WiFi.h
-#include "NuSock.h"
-
-NuSockServer wss;
-WiFiServerSecure server(443);
-
-// Certificates (BearSSL for ESP8266 / Certs for Pico W)
-const char* cert = "...";
-const char* key = "...";
-
-void setup() {
-    WiFi.begin("SSID", "PASS");
-    
-    // Configure SSL Server
-    server.setServerCert(cert); // API varies by platform/core
-    server.setServerKey(key);
-    server.begin();
-
-    // Bind NuSock to the secure server
-    wss.onEvent(onEvent);
-    wss.begin(&server, 443);
-}
-
-void loop() {
-    wss.loop();
-}
-```
-
-### 3. Standard Server (ESP32/ESP8266 - LwIP Mode)
+### 2. Standard Server (ESP32/ESP8266 - LwIP Mode)
 Ideal for high-performance non-SSL applications.
 
 ```cpp
@@ -171,7 +158,7 @@ NuSockServer ws;
 
 void setup() {
     WiFi.begin("SSID", "PASS");
-    // ... wait ...
+    // wait
     
     ws.onEvent(onEvent);
     ws.begin(80); // Internal LwIP server created automatically
@@ -182,7 +169,7 @@ void loop() {
 }
 ```
 
-### 4. Standard Server (Uno R4 / Portenta / Giga / MKR - Generic Mode)
+### 3. Standard Server (Uno R4 / Portenta / Giga / MKR - Generic Mode)
 Compatible with **Arduino Uno R4 WiFi**, **Portenta C33/H7**, **Giga R1**, **Nano 33 IoT**, **MKR 1010**, **Uno WiFi Rev2**, etc. NuSock wraps the existing `WiFiServer` object.
 
 ```cpp
@@ -205,12 +192,12 @@ NuSockServer ws;
 
 void setup() {
     WiFi.begin("SSID", "PASS");
-    // ... wait ...
+    // wait
 
-    // 2. Start the underlying server
+    // Start the underlying server
     server.begin();
 
-    // 3. Bind NuSock to it
+    // Bind NuSock to it
     ws.onEvent(onEvent);
     ws.begin(&server, 80);
 }
@@ -220,7 +207,7 @@ void loop() {
 }
 ```
 
-### 5. Secure WebSocket Client (WSS) [ESP32 Native]
+### 4. Secure WebSocket Client (WSS) [ESP32 Native]
 ESP32 can use `NuSockClientSecure` which uses the native `esp_tls` stack for high performance.
 
 ```cpp
@@ -231,7 +218,7 @@ NuSockClientSecure client;
 
 void setup() {
     WiFi.begin("SSID", "PASS");
-    // ... wait ...
+    // wait
 
     // Set custom CA if needed, otherwise uses built-in bundle
     // client.setCACert(root_ca); 
@@ -246,7 +233,7 @@ void loop() {
 }
 ```
 
-### 6. Generic WebSocket Client (WS/WSS)
+### 5. Generic WebSocket Client (WS/WSS)
 Compatible with `WiFiClient`, `WiFiClientSecure`, or `EthernetClient`. Works on all platforms (Uno R4, Portenta, Giga, MKR, ESP8266, Rev2, etc.).
 
 ```cpp
@@ -266,6 +253,42 @@ void setup() {
 void loop() {
     client.loop();
 }
+```
+
+---
+
+## 🛠 Advanced Features
+
+### Sending Fragmented Data (Streaming)
+You can send large files or data streams by breaking them into chunks.
+
+**Server Example:**
+```cpp
+// 1. Start the stream (isBinary = true)
+ws.sendFragmentStart(clientIndex, buffer, len, true);
+
+// 2. Send middle chunks (Loop)
+ws.sendFragmentCont(clientIndex, buffer, len);
+
+// 3. Finish the stream
+ws.sendFragmentFin(clientIndex, buffer, len);
+```
+
+* **See Example:** [`examples/Features/Fragmented_File_Send`](/examples/Features/Fragmented_File_Send)
+
+**Client Example:**
+
+* **See Example:** [`examples/Features/Fragmented_File_Receive`](/examples/Features/Fragmented_File_Receive)
+
+### Graceful Disconnect (Close Handshake)
+Initiate a clean disconnect compliant with RFC 6455 by sending a status code and reason.
+
+```cpp
+// Server: Close specific client with code 1001 (Going Away)
+ws.close(clientIndex, 1001, "Server Shutting Down");
+
+// Client: Close connection with code 1000 (Normal)
+client.close(1000, "Job Done");
 ```
 
 ---

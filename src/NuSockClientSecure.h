@@ -16,7 +16,6 @@
 #include <esp_crt_bundle.h> // Required for default public server trust
 #include <fcntl.h>
 
-// Callback signature for secure client events
 typedef void (*NuClientSecureEventCallback)(NuClient *client, NuClientEvent event, const uint8_t *payload, size_t len);
 
 /**
@@ -52,20 +51,27 @@ private:
     }
 
     // Helper: Build and append a WebSocket frame to the TX buffer
-    void buildFrame(NuClient *c, uint8_t opcode, const uint8_t *data, size_t len)
+    void buildFrame(NuClient *c, uint8_t opcode, bool isFin, const uint8_t *data, size_t len)
     {
         uint8_t mask[4];
         for (int i = 0; i < 4; i++)
             mask[i] = random(0, 255);
 
-        c->appendTx(0x80 | opcode);
+        // Apply FIN bit based on argument
+        uint8_t firstByte = opcode & 0x0F;
+        if (isFin)
+        {
+            firstByte |= 0x80;
+        }
+        c->appendTx(firstByte);
+
         if (len <= 125)
         {
-            c->appendTx((uint8_t)len | 0x80);
+            c->appendTx((uint8_t)len | 0x80); // Mask bit set
         }
         else
         {
-            c->appendTx(126 | 0x80);
+            c->appendTx(126 | 0x80); // Mask bit set
             c->appendTx(len >> 8);
             c->appendTx(len & 0xFF);
         }
@@ -75,7 +81,6 @@ private:
             c->appendTx(data[j] ^ mask[j % 4]);
     }
 
-    // Helper: Process incoming data from the SSL buffer
     void process_rx_buffer()
     {
         if (!_internalClient)
@@ -85,17 +90,11 @@ private:
         {
             if (_internalClient->rxLen > 0)
             {
-                // Ensure null termination for string search safety
                 if (_internalClient->rxLen < MAX_WS_BUFFER)
                     _internalClient->rxBuffer[_internalClient->rxLen] = 0;
                 else
                     _internalClient->rxBuffer[MAX_WS_BUFFER - 1] = 0;
 
-#if defined(NUSOCK_DEBUG)
-// NuSock::printLog("DBG ", "%s",(char*)_internalClient->rxBuffer);
-#endif
-
-                // Check for successful upgrade
                 if (strstr((char *)_internalClient->rxBuffer, "101 Switching Protocols"))
                 {
                     _internalClient->state = NuClient::STATE_CONNECTED;
@@ -105,7 +104,6 @@ private:
                 }
                 else if (_internalClient->rxLen > 1024)
                 {
-                    // Buffer full without valid handshake -> Fail
                     stop();
                 }
             }
@@ -116,11 +114,29 @@ private:
             while (_internalClient->rxLen >= 2)
             {
                 uint8_t opcode = _internalClient->rxBuffer[0] & 0x0F;
+                bool isFin = (_internalClient->rxBuffer[0] & 0x80);
                 uint8_t lenByte = _internalClient->rxBuffer[1] & 0x7F;
+                bool isMasked = (_internalClient->rxBuffer[1] & 0x80);
+
+                // Strict checks
+#if defined(NUSOCK_FULL_COMPLIANCE) || defined(NUSOCK_RFC_STRICT_MASK_RSV)
+                // RSV check
+                if ((_internalClient->rxBuffer[0] & 0x70) != 0)
+                {
+                    stop();
+                    return;
+                }
+                // Strict Masking (Client MUST receive UNMASKED)
+                if (isMasked)
+                {
+                    stop();
+                    return;
+                }
+#endif
+
                 size_t headerSize = 2;
                 size_t payloadLen = lenByte;
 
-                // Handle extended payload lengths
                 if (payloadLen == 126)
                 {
                     if (_internalClient->rxLen < 4)
@@ -129,28 +145,161 @@ private:
                     headerSize += 2;
                 }
 
-                if (_internalClient->rxLen < headerSize + payloadLen)
+                if (isMasked)
+                    headerSize += 4;
+
+                size_t totalFrameSize = headerSize + payloadLen;
+                if (_internalClient->rxLen < totalFrameSize)
                     return;
 
+                // Control frames
+                if (opcode >= 0x8)
+                {
+#if defined(NUSOCK_FULL_COMPLIANCE) || defined(NUSOCK_RFC_FRAGMENTATION) || defined(NUSOCK_RFC_STRICT_MASK_RSV)
+                    if (!isFin || payloadLen > 125)
+                    {
+                        stop();
+                        return;
+                    }
+#endif
+                    uint8_t *payload = &_internalClient->rxBuffer[headerSize]; // Unmasked from Server
+
+                    if (opcode == 0x8)
+                    {
+#if defined(NUSOCK_FULL_COMPLIANCE) || defined(NUSOCK_RFC_CLOSE_HANDSHAKE)
+                        if (payloadLen == 1)
+                        {
+                            stop();
+                            return;
+                        }
+
+                        // We initiated close
+                        if (_internalClient->state == NuClient::STATE_CLOSING)
+                        {
+                            stop();
+                            return;
+                        }
+
+                        // Server initiated close
+                        // Echo
+                        buildFrame(_internalClient, 0x8, true, payload, payloadLen);
+                        if (_internalClient->txLen > 0)
+                        {
+                            esp_tls_conn_write(_tls, _internalClient->txBuffer, _internalClient->txLen);
+                            _internalClient->clearTx();
+                        }
+#endif
+                        stop();
+                        return;
+                    }
+                    else if (opcode == 0x9)
+                    {
+                        buildFrame(_internalClient, 0xA, true, payload, payloadLen);
+                    }
+
+                    size_t rem = _internalClient->rxLen - totalFrameSize;
+                    if (rem > 0)
+                        memmove(_internalClient->rxBuffer, _internalClient->rxBuffer + totalFrameSize, rem);
+                    _internalClient->rxLen -= totalFrameSize;
+                    continue;
+                }
+
+                // Data frames
                 uint8_t *payload = &_internalClient->rxBuffer[headerSize];
 
-                // Dispatch Events
+#if defined(NUSOCK_FULL_COMPLIANCE) || defined(NUSOCK_RFC_UTF8_STRICT)
+                // UTF-8 validation
+                bool checkUTF8 = (opcode == 0x1);
+#if defined(NUSOCK_FULL_COMPLIANCE) || defined(NUSOCK_RFC_FRAGMENTATION)
+                if (opcode == 0 && _internalClient->fragmentOpcode == 0x1)
+                    checkUTF8 = true;
+#endif
+
+                if (checkUTF8)
+                {
+                    if (!NuUTF8::validate(_internalClient->utf8State, payload, payloadLen))
+                    {
+#if defined(NUSOCK_DEBUG)
+                        NuSock::printLog("DBG ", "Error: Invalid UTF-8 sequence\n");
+#endif
+                        if (_onEvent)
+                            _onEvent(_internalClient, CLIENT_EVENT_ERROR, (uint8_t *)"Invalid UTF-8 sequence", 22);
+                        stop(); // Close Code 1007
+                        return;
+                    }
+
+                    if (isFin)
+                    {
+                        if (!NuUTF8::isComplete(_internalClient->utf8State))
+                        {
+#if defined(NUSOCK_DEBUG)
+                            NuSock::printLog("DBG ", "Error: Incomplete UTF-8 at FIN\n");
+#endif
+                            if (_onEvent)
+                                _onEvent(_internalClient, CLIENT_EVENT_ERROR, (uint8_t *)"Incomplete UTF-8 at FIN", 23);
+                            stop(); // Close Code 1007
+                            return;
+                        }
+                        _internalClient->utf8State = 0; // Reset for next message
+                    }
+                }
+#endif
+
+#if defined(NUSOCK_FULL_COMPLIANCE) || defined(NUSOCK_RFC_FRAGMENTATION)
+                if (opcode > 0)
+                {
+                    if (_internalClient->fragmentOpcode != 0)
+                    {
+                        stop();
+                        return;
+                    }
+
+                    if (!isFin)
+                    {
+                        _internalClient->fragmentOpcode = opcode;
+                        if (_onEvent)
+                            _onEvent(_internalClient, CLIENT_EVENT_FRAGMENT_START, payload, payloadLen);
+                    }
+                    else
+                    {
+                        if (opcode == 0x1 && _onEvent)
+                            _onEvent(_internalClient, CLIENT_EVENT_MESSAGE_TEXT, payload, payloadLen);
+                        else if (opcode == 0x2 && _onEvent)
+                            _onEvent(_internalClient, CLIENT_EVENT_MESSAGE_BINARY, payload, payloadLen);
+                    }
+                }
+                else if (opcode == 0)
+                {
+                    if (_internalClient->fragmentOpcode == 0)
+                    {
+                        stop();
+                        return;
+                    }
+
+                    if (!isFin)
+                    {
+                        if (_onEvent)
+                            _onEvent(_internalClient, CLIENT_EVENT_FRAGMENT_CONT, payload, payloadLen);
+                    }
+                    else
+                    {
+                        if (_onEvent)
+                            _onEvent(_internalClient, CLIENT_EVENT_FRAGMENT_FIN, payload, payloadLen);
+                        _internalClient->fragmentOpcode = 0;
+                    }
+                }
+#else
                 if (opcode == 0x1 && _onEvent)
                     _onEvent(_internalClient, CLIENT_EVENT_MESSAGE_TEXT, payload, payloadLen);
                 else if (opcode == 0x2 && _onEvent)
                     _onEvent(_internalClient, CLIENT_EVENT_MESSAGE_BINARY, payload, payloadLen);
-                else if (opcode == 0x8)
-                {
-                    stop();
-                    return;
-                }
+#endif
 
-                // Shift processed frame out of buffer
-                size_t total = headerSize + payloadLen;
-                size_t rem = _internalClient->rxLen - total;
+                // Consume
+                size_t rem = _internalClient->rxLen - totalFrameSize;
                 if (rem > 0)
-                    memmove(_internalClient->rxBuffer, &_internalClient->rxBuffer[total], rem);
-                _internalClient->rxLen = rem;
+                    memmove(_internalClient->rxBuffer, _internalClient->rxBuffer + totalFrameSize, rem);
+                _internalClient->rxLen -= totalFrameSize;
             }
         }
     }
@@ -251,6 +400,10 @@ public:
 #if defined(NUSOCK_DEBUG)
             NuSock::printLog("DBG ", "Connection Failed. Error: %d\n", ret);
 #endif
+            char errBuf[64];
+            snprintf(errBuf, 64, "Connection Failed. Error: %d\n", ret);
+            if (_onEvent)
+                _onEvent(_internalClient, CLIENT_EVENT_ERROR, (uint8_t *)errBuf, strlen(errBuf));
             esp_tls_conn_destroy(_tls);
             _tls = nullptr;
             return false;
@@ -381,7 +534,7 @@ public:
     {
         if (_internalClient && _internalClient->state == NuClient::STATE_CONNECTED)
         {
-            buildFrame(_internalClient, 0x1, (const uint8_t *)msg, strlen(msg));
+            buildFrame(_internalClient, 0x1, true, (const uint8_t *)msg, strlen(msg));
         }
     }
 
@@ -394,7 +547,94 @@ public:
     {
         if (_internalClient && _internalClient->state == NuClient::STATE_CONNECTED)
         {
-            buildFrame(_internalClient, 0x2, data, len);
+            buildFrame(_internalClient, 0x2, true, data, len);
+        }
+    }
+    /**
+     * @brief Start a fragmented message(FIN = 0).
+     * @param payload The first chunk of data.
+     * @param len Length of the data chunk.
+     * @param isBinary If true,
+     * starts a Binary message(Opcode 0x2).If false, starts Text(Opcode 0x1).
+     */
+    void sendFragmentStart(const uint8_t *payload, size_t len, bool isBinary)
+    {
+        if (_internalClient && _internalClient->state == NuClient::STATE_CONNECTED)
+        {
+            // FIN = false, Opcode = 0x1 (Text) or 0x2 (Binary)
+            buildFrame(_internalClient, isBinary ? 0x2 : 0x1, false, payload, len);
+        }
+    }
+
+    /**
+     * @brief Send a middle fragment (FIN=0, Opcode=0x0).
+     * @param payload The data chunk.
+     * @param len Length of the data chunk.
+     */
+    void sendFragmentCont(const uint8_t *payload, size_t len)
+    {
+        if (_internalClient && _internalClient->state == NuClient::STATE_CONNECTED)
+        {
+            // FIN = false, Opcode = 0x0 (Continuation)
+            buildFrame(_internalClient, 0x0, false, payload, len);
+        }
+    }
+
+    /**
+     * @brief Finish a fragmented message (FIN=1, Opcode=0x0).
+     * @param payload The last data chunk.
+     * @param len Length of the data chunk.
+     */
+    void sendFragmentFin(const uint8_t *payload, size_t len)
+    {
+        if (_internalClient && _internalClient->state == NuClient::STATE_CONNECTED)
+        {
+            // FIN = true, Opcode = 0x0 (Continuation)
+            buildFrame(_internalClient, 0x0, true, payload, len);
+        }
+    }
+
+    /**
+     * @brief Send a Ping (0x9) control frame to the server.
+     */
+    void sendPing(const char *msg = "")
+    {
+        if (_internalClient && _internalClient->state == NuClient::STATE_CONNECTED)
+        {
+            buildFrame(_internalClient, 0x9, true, (const uint8_t *)msg, strlen(msg));
+        }
+    }
+
+    /**
+     * @brief Initiate a graceful Close Handshake (RFC 6455).
+     * @param code Status code (default 1000).
+     * @param reason Optional reason string.
+     */
+    void close(uint16_t code = 1000, const char *reason = "")
+    {
+        if (_internalClient && _internalClient->state == NuClient::STATE_CONNECTED)
+        {
+            uint8_t payload[128];
+            payload[0] = (uint8_t)((code >> 8) & 0xFF);
+            payload[1] = (uint8_t)(code & 0xFF);
+
+            size_t reasonLen = strlen(reason);
+            if (reasonLen > 123)
+                reasonLen = 123;
+
+            if (reasonLen > 0)
+                memcpy(&payload[2], reason, reasonLen);
+
+            buildFrame(_internalClient, 0x8, true, payload, 2 + reasonLen);
+
+            // Flush immediate for close
+            if (_internalClient->txLen > 0)
+            {
+                esp_tls_conn_write(_tls, _internalClient->txBuffer, _internalClient->txLen);
+                _internalClient->clearTx();
+            }
+
+            _internalClient->state = NuClient::STATE_CLOSING;
         }
     }
 

@@ -6,19 +6,23 @@
 
 #ifndef NUSOCK_H
 #define NUSOCK_H
-
+#include <Arduino.h>
 #include <stdarg.h>
 
-#define NUSOCK_VERSION_MAJOR 1
+#define NUSOCK_VERSION_MAJOR 2
 #define NUSOCK_VERSION_MINOR 0
-#define NUSOCK_VERSION_PATCH 6
-#define NUSOCK_VERSION_STR "1.0.6"
+#define NUSOCK_VERSION_PATCH 0
+#define NUSOCK_VERSION_STR "2.0.0"
+
+#ifndef NUSOCK_DEBUG_PORT
+#define NUSOCK_DEBUG_PORT Serial
+#endif
 
 class NuSock
 {
 public:
     /**
-     * @brief Helper to print IPAddress to Serial (Useful for AVR)
+     * @brief Helper to print IPAddress to NUSOCK_DEBUG_PORT (Useful for AVR)
      */
     static const char *ipStr(IPAddress ip)
     {
@@ -28,7 +32,7 @@ public:
     }
 
     /**
-     * @brief Helper to provide printf functionality to Serial
+     * @brief Helper to provide printf functionality to NUSOCK_DEBUG_PORT
      */
     static void printf(const char *format, ...)
     {
@@ -37,7 +41,7 @@ public:
         va_start(args, format);
         vsnprintf(buf, sizeof(buf), format, args);
         va_end(args);
-        Serial.print(buf);
+        NUSOCK_DEBUG_PORT.print(buf);
     }
 
     static void printLog(const char *tag, const char *format, ...)
@@ -50,12 +54,12 @@ public:
         // Print Timestamp [HH:MM:SS]
         char timeBuf[20];
         sprintf(timeBuf, "[%02lu:%02lu:%02lu]", hours, mins, secs);
-        Serial.print(timeBuf);
+        NUSOCK_DEBUG_PORT.print(timeBuf);
 
         // Print Tag [TAG ]
-        Serial.print(" [");
-        Serial.print(tag);
-        Serial.print("] ");
+        NUSOCK_DEBUG_PORT.print(" [");
+        NUSOCK_DEBUG_PORT.print(tag);
+        NUSOCK_DEBUG_PORT.print("] ");
 
         // Print Message
         char msg[128];
@@ -64,7 +68,7 @@ public:
         vsnprintf(msg, sizeof(msg), format, args);
         va_end(args);
 
-        Serial.print(msg);
+        NUSOCK_DEBUG_PORT.print(msg);
     }
 };
 

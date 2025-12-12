@@ -46,7 +46,7 @@ static inline err_t tcpip_callback(void (*f)(void *), void *ctx)
 #include "mbedtls/base64.h"
 #endif
 #else
-// GENERIC (SAMD, STM32, RP2040, etc)
+// Generic (SAMD, STM32, RP2040, etc)
 #include <Client.h>
 #include <Server.h>
 

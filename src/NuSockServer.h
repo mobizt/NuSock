@@ -12,7 +12,6 @@
 #include "NuSockTypes.h"
 #include "vector/dynamic/DynamicVector.h"
 
-// Callback Signature
 typedef void (*NuServerEventCallback)(NuClient *client, NuServerEvent event, const uint8_t *payload, size_t len);
 
 class NuSockServer
@@ -63,9 +62,15 @@ private:
         }
     }
 
-    void buildFrame(NuClient *c, uint8_t opcode, const uint8_t *data, size_t len)
+    void buildFrame(NuClient *c, uint8_t opcode, bool isFin, const uint8_t *data, size_t len)
     {
-        c->appendTx(0x80 | opcode);
+        uint8_t firstByte = opcode & 0x0F;
+        if (isFin)
+        {
+            firstByte |= 0x80;
+        }
+        c->appendTx(firstByte);
+
         if (len <= 125)
         {
             c->appendTx((uint8_t)len);
@@ -141,19 +146,61 @@ private:
         tcp_output(c->pcb);
         s->myLock.unlock();
     }
+
     void lwip_process(NuClient *c)
     {
         if (!c->rxBuffer)
             return;
+
+        // Process Loop: Standard consuming loop (parse -> dispatch -> consume)
         while (c->rxLen > 0)
         {
             if (c->rxLen < 2)
-                return;
+                return; // Wait for header
+
             uint8_t opcode = c->rxBuffer[0] & 0x0F;
+            bool isFin = (c->rxBuffer[0] & 0x80);
             uint8_t lenByte = c->rxBuffer[1] & 0x7F;
             bool isMasked = (c->rxBuffer[1] & 0x80);
+
+            // Strict masking & RSV checks
+#if defined(NUSOCK_FULL_COMPLIANCE) || defined(NUSOCK_RFC_STRICT_MASK_RSV)
+            // RSV bit check (must be 0)
+            if ((c->rxBuffer[0] & 0x70) != 0)
+            {
+                if (_onEvent)
+                    _onEvent(c, SERVER_EVENT_ERROR, (const uint8_t *)"RSV Error", 9);
+                c->last_event = SERVER_EVENT_ERROR;
+                tcpip_callback(static_close_client, c);
+                return;
+            }
+            // Strict Masking check (server must receive masked)
+            if (!isMasked)
+            {
+                if (_onEvent)
+                    _onEvent(c, SERVER_EVENT_ERROR, (const uint8_t *)"Mask Error", 10);
+                c->last_event = SERVER_EVENT_ERROR;
+                tcpip_callback(static_close_client, c);
+                return;
+            }
+            // Control frame validation (basic)
+            if (opcode >= 0x8)
+            {
+                // Control frames cannot be fragmented (FIN must be 1)
+                // Control frames cannot have payload > 125
+                if (!isFin || lenByte > 125)
+                {
+                    if (_onEvent)
+                        _onEvent(c, SERVER_EVENT_ERROR, (const uint8_t *)"Control Err", 11);
+                    tcpip_callback(static_close_client, c);
+                    return;
+                }
+            }
+#endif
+
             size_t headerSize = 2;
             size_t payloadLen = lenByte;
+
             if (payloadLen == 126)
             {
                 if (c->rxLen < 4)
@@ -163,48 +210,178 @@ private:
             }
             else if (payloadLen == 127)
             {
+                // (Optional 64-bit support or Error)
                 if (_onEvent)
                     _onEvent(c, SERVER_EVENT_ERROR, (const uint8_t *)"Frame Too Large", 15);
-                c->last_event = SERVER_EVENT_ERROR;
                 tcpip_callback(static_close_client, c);
                 return;
             }
+
             if (isMasked)
                 headerSize += 4;
-            if (c->rxLen < headerSize + payloadLen)
-                return;
+
+            size_t totalFrameSize = headerSize + payloadLen;
+            if (c->rxLen < totalFrameSize)
+                return; // Wait for full payload
+
             size_t maskOffset = headerSize - 4;
-            if (opcode == 0x8)
+
+            // Control frame handling (OpCode >= 0x8)
+            if (opcode >= 0x8)
             {
-                tcpip_callback(static_close_client, c);
-                return;
+                // Unmask control frame in-place
+                if (isMasked)
+                {
+                    uint8_t mask[4] = {c->rxBuffer[maskOffset], c->rxBuffer[maskOffset + 1],
+                                       c->rxBuffer[maskOffset + 2], c->rxBuffer[maskOffset + 3]};
+                    // Use a temp pointer to avoid affecting the buffer logic below
+                    uint8_t *ctrlPayload = &c->rxBuffer[headerSize];
+                    for (size_t i = 0; i < payloadLen; i++)
+                        ctrlPayload[i] ^= mask[i % 4];
+                }
+                uint8_t *ctrlPayload = &c->rxBuffer[headerSize];
+
+                // Close handshake (Opcode 0x8)
+                if (opcode == 0x8)
+                {
+#if defined(NUSOCK_FULL_COMPLIANCE) || defined(NUSOCK_RFC_CLOSE_HANDSHAKE)
+                    // Protocol Error: Payload length 1 is illegal (must be 0 or >= 2)
+                    if (payloadLen == 1)
+                    {
+                        tcpip_callback(static_close_client, c);
+                        return;
+                    }
+
+                    // We initiated the close (State is CLOSING).
+                    // This frame is the Client's acknowledgement.
+                    if (c->state == NuClient::STATE_CLOSING)
+                    {
+                        // Handshake complete. Close TCP connection.
+                        tcpip_callback(static_close_client, c);
+                        return;
+                    }
+
+                    // Client initiated the close (State is CONNECTED).
+                    // We must Echo the payload back and then close.
+                    buildFrame(c, 0x8, true, ctrlPayload, payloadLen);
+                    tcpip_callback(static_flush_client, c);
+
+                    // Fire Event
+                    if (_onEvent && c->last_event != SERVER_EVENT_CLIENT_DISCONNECTED)
+                        _onEvent(c, SERVER_EVENT_CLIENT_DISCONNECTED, ctrlPayload, payloadLen);
+
+                    c->last_event = SERVER_EVENT_CLIENT_DISCONNECTED;
+                    tcpip_callback(static_close_client, c);
+                    return;
+#else
+                    // Legacy/Simple behavior
+                    tcpip_callback(static_close_client, c);
+                    return;
+#endif
+                }
+                else if (opcode == 0x9)
+                {
+                    // Ping -> Pong
+                    buildFrame(c, 0xA, true, ctrlPayload, payloadLen);
+                    tcpip_callback(static_flush_client, c);
+                }
+
+                // Strip Control frame from buffer and continue
+                // We use memmove to shift the rest of the buffer over this control frame
+                size_t rem = c->rxLen - totalFrameSize;
+                if (rem > 0)
+                    memmove(c->rxBuffer, c->rxBuffer + totalFrameSize, rem);
+                c->rxLen -= totalFrameSize;
+                continue;
             }
-            if ((opcode == 0x1 || opcode == 0x2) && isMasked)
+
+            // Fragmentation state validation
+#if defined(NUSOCK_FULL_COMPLIANCE) || defined(NUSOCK_RFC_FRAGMENTATION)
+            if (opcode > 0) // New data frame
             {
-                uint8_t mask[4] = {c->rxBuffer[maskOffset], c->rxBuffer[maskOffset + 1], c->rxBuffer[maskOffset + 2], c->rxBuffer[maskOffset + 3]};
+                if (c->fragmentOpcode != 0)
+                {
+                    // Error: nested message
+                    if (_onEvent)
+                        _onEvent(c, SERVER_EVENT_ERROR, (const uint8_t *)"Frag Error", 10);
+                    tcpip_callback(static_close_client, c);
+                    return;
+                }
+                if (!isFin)
+                    c->fragmentOpcode = opcode; // Mark start
+            }
+            else if (opcode == 0) // Continuation
+            {
+                if (c->fragmentOpcode == 0)
+                {
+                    // Error: Orphan continuation
+                    if (_onEvent)
+                        _onEvent(c, SERVER_EVENT_ERROR, (const uint8_t *)"Frag Error", 10);
+                    tcpip_callback(static_close_client, c);
+                    return;
+                }
+                if (isFin)
+                    c->fragmentOpcode = 0; // Mark end
+            }
+#endif
+            // Unmask Payload
+            if (isMasked)
+            {
+                uint8_t mask[4] = {c->rxBuffer[maskOffset], c->rxBuffer[maskOffset + 1],
+                                   c->rxBuffer[maskOffset + 2], c->rxBuffer[maskOffset + 3]};
                 uint8_t *payload = &c->rxBuffer[headerSize];
                 for (size_t i = 0; i < payloadLen; i++)
                     payload[i] ^= mask[i % 4];
-                if (opcode == 0x1)
+            }
+
+            uint8_t *payload = &c->rxBuffer[headerSize];
+
+            // Streaming event dispatch
+#if defined(NUSOCK_FULL_COMPLIANCE) || defined(NUSOCK_RFC_FRAGMENTATION)
+            if (opcode > 0)
+            {
+                if (!isFin)
                 {
                     if (_onEvent)
-                        _onEvent(c, SERVER_EVENT_MESSAGE_TEXT, payload, payloadLen);
-                    c->last_event = SERVER_EVENT_MESSAGE_TEXT;
+                        _onEvent(c, SERVER_EVENT_FRAGMENT_START, payload, payloadLen);
                 }
-                else if (opcode == 0x2)
+                else
                 {
-                    if (_onEvent)
+                    // Normal complete message
+                    if (opcode == 0x1 && _onEvent)
+                        _onEvent(c, SERVER_EVENT_MESSAGE_TEXT, payload, payloadLen);
+                    else if (opcode == 0x2 && _onEvent)
                         _onEvent(c, SERVER_EVENT_MESSAGE_BINARY, payload, payloadLen);
-                    c->last_event = SERVER_EVENT_MESSAGE_BINARY;
                 }
             }
-            size_t total = headerSize + payloadLen;
-            size_t rem = c->rxLen - total;
+            else if (opcode == 0)
+            {
+                if (!isFin)
+                {
+                    if (_onEvent)
+                        _onEvent(c, SERVER_EVENT_FRAGMENT_CONT, payload, payloadLen);
+                }
+                else
+                {
+                    if (_onEvent)
+                        _onEvent(c, SERVER_EVENT_FRAGMENT_FIN, payload, payloadLen);
+                }
+            }
+#else
+            // Legacy event dispatch (Ignore OpCode 0 logic)
+            if (opcode == 0x1 && _onEvent)
+                _onEvent(c, SERVER_EVENT_MESSAGE_TEXT, payload, payloadLen);
+            else if (opcode == 0x2 && _onEvent)
+                _onEvent(c, SERVER_EVENT_MESSAGE_BINARY, payload, payloadLen);
+#endif
+            // Consume frame
+            size_t rem = c->rxLen - totalFrameSize;
             if (rem > 0)
-                memmove(c->rxBuffer, &c->rxBuffer[total], rem);
-            c->rxLen = rem;
+                memmove(c->rxBuffer, c->rxBuffer + totalFrameSize, rem);
+            c->rxLen -= totalFrameSize;
         }
     }
+
     static err_t cb_recv(void *arg, struct tcp_pcb *pcb, struct pbuf *p, err_t err)
     {
         NuClient *c = (NuClient *)arg;
@@ -407,9 +584,33 @@ private:
             {
                 if (c->rxLen < 2)
                     return;
+
                 uint8_t opcode = c->rxBuffer[0] & 0x0F;
+                bool isFin = (c->rxBuffer[0] & 0x80);
                 uint8_t lenByte = c->rxBuffer[1] & 0x7F;
                 bool isMasked = (c->rxBuffer[1] & 0x80);
+
+#if defined(NUSOCK_FULL_COMPLIANCE) || defined(NUSOCK_RFC_STRICT_MASK_RSV)
+                // RSV bit check
+                if ((c->rxBuffer[0] & 0x70) != 0)
+                {
+                    if (_onEvent)
+                        _onEvent(c, SERVER_EVENT_ERROR, (const uint8_t *)"RSV Error", 9);
+                    c->last_event = SERVER_EVENT_ERROR;
+                    c->client->stop();
+                    return;
+                }
+                // Strict masking check
+                if (!isMasked)
+                {
+                    if (_onEvent)
+                        _onEvent(c, SERVER_EVENT_ERROR, (const uint8_t *)"Mask Error", 10);
+                    c->last_event = SERVER_EVENT_ERROR;
+                    c->client->stop();
+                    return;
+                }
+#endif
+
                 size_t headerSize = 2;
                 size_t payloadLen = lenByte;
                 if (payloadLen == 126)
@@ -419,27 +620,242 @@ private:
                     payloadLen = (c->rxBuffer[2] << 8) | c->rxBuffer[3];
                     headerSize += 2;
                 }
-                if (isMasked)
-                    headerSize += 4;
-                if (c->rxLen < headerSize + payloadLen)
-                    return;
-                size_t maskOffset = headerSize - 4;
-
-                if (opcode == 0x8)
+                else if (payloadLen == 127)
                 {
-                    if (_onEvent && c->last_event != SERVER_EVENT_CLIENT_DISCONNECTED)
-                        _onEvent(c, SERVER_EVENT_CLIENT_DISCONNECTED, nullptr, 0);
+                    // Frame too large / 64-bit not supported in basic implementation
                     c->client->stop();
-                    c->last_event = SERVER_EVENT_CLIENT_DISCONNECTED;
                     return;
                 }
 
+                if (isMasked)
+                    headerSize += 4;
+
+                size_t totalFrameSize = headerSize + payloadLen;
+                if (c->rxLen < totalFrameSize)
+                    return;
+
+                size_t maskOffset = headerSize - 4;
+
+                // Control frame handling
+                if (opcode >= 0x8)
+                {
+#if defined(NUSOCK_FULL_COMPLIANCE) || defined(NUSOCK_RFC_FRAGMENTATION) || defined(NUSOCK_RFC_STRICT_MASK_RSV)
+                    // Control frames cannot be fragmented or > 125 bytes
+                    if (!isFin || payloadLen > 125)
+                    {
+                        c->client->stop();
+                        return;
+                    }
+#endif
+
+                    // Unmask control frame (in place)
+                    if (isMasked)
+                    {
+                        uint8_t mask[4] = {c->rxBuffer[maskOffset], c->rxBuffer[maskOffset + 1], c->rxBuffer[maskOffset + 2], c->rxBuffer[maskOffset + 3]};
+                        uint8_t *ctrlPayload = &c->rxBuffer[headerSize];
+                        for (size_t i = 0; i < payloadLen; i++)
+                            ctrlPayload[i] ^= mask[i % 4];
+                    }
+                    uint8_t *ctrlPayload = &c->rxBuffer[headerSize];
+
+                    // Close Handshake Handling
+                    if (opcode == 0x8)
+                    {
+#if defined(NUSOCK_FULL_COMPLIANCE) || defined(NUSOCK_RFC_CLOSE_HANDSHAKE)
+                        // Protocol Error
+                        if (payloadLen == 1)
+                        {
+                            c->client->stop();
+                            return;
+                        }
+
+                        // We initiated close (State is CLOSING)
+                        if (c->state == NuClient::STATE_CLOSING)
+                        {
+                            c->client->stop();
+                            removeClient(c);
+                            return;
+                        }
+
+                        // Client initiated close (State is CONNECTED)
+                        // Echo close frame
+                        buildFrame(c, 0x8, true, ctrlPayload, payloadLen);
+                        if (c->txBuffer && c->txLen > 0)
+                        {
+                            c->client->write(c->txBuffer, c->txLen);
+                            c->clearTx();
+                        }
+
+                        if (_onEvent && c->last_event != SERVER_EVENT_CLIENT_DISCONNECTED)
+                            _onEvent(c, SERVER_EVENT_CLIENT_DISCONNECTED, ctrlPayload, payloadLen);
+                        c->last_event = SERVER_EVENT_CLIENT_DISCONNECTED;
+
+                        c->client->stop();
+                        return;
+#else
+                        if (_onEvent && c->last_event != SERVER_EVENT_CLIENT_DISCONNECTED)
+                            _onEvent(c, SERVER_EVENT_CLIENT_DISCONNECTED, nullptr, 0);
+                        c->client->stop();
+                        c->last_event = SERVER_EVENT_CLIENT_DISCONNECTED;
+                        return;
+#endif
+                    }
+                    else if (opcode == 0x9)
+                    {
+                        // Ping -> Pong
+                        buildFrame(c, 0xA, true, ctrlPayload, payloadLen);
+                    }
+
+                    // Strip control frame
+                    size_t rem = c->rxLen - totalFrameSize;
+                    if (rem > 0)
+                        memmove(c->rxBuffer, c->rxBuffer + totalFrameSize, rem);
+                    c->rxLen -= totalFrameSize;
+                    continue;
+                }
+
+                // Data frame handling
+#if defined(NUSOCK_FULL_COMPLIANCE) || defined(NUSOCK_RFC_FRAGMENTATION)
+                // Streaming fragmentation logic
+                if (opcode > 0) // New data frame
+                {
+                    if (c->fragmentOpcode != 0)
+                    {
+                        c->client->stop();
+                        return; // Error: Nested fragmentation
+                    }
+
+                    // Unmask payload
+                    if (isMasked)
+                    {
+                        uint8_t mask[4] = {c->rxBuffer[maskOffset], c->rxBuffer[maskOffset + 1], c->rxBuffer[maskOffset + 2], c->rxBuffer[maskOffset + 3]};
+                        uint8_t *payload = &c->rxBuffer[headerSize];
+                        for (size_t i = 0; i < payloadLen; i++)
+                            payload[i] ^= mask[i % 4];
+                    }
+                    uint8_t *payload = &c->rxBuffer[headerSize];
+
+                    // Strict UTF-8 validation
+#if defined(NUSOCK_FULL_COMPLIANCE) || defined(NUSOCK_RFC_UTF8_STRICT)
+                    if (opcode == 0x1)
+                    {
+                        if (!NuUTF8::validate(c->utf8State, payload, payloadLen))
+                        {
+                            if (_onEvent)
+                                _onEvent(c, SERVER_EVENT_ERROR, (const uint8_t *)"Invalid UTF-8", 13);
+                            // RFC 6455 1007: Invalid frame payload data
+                            c->client->stop();
+                            return;
+                        }
+                    }
+#endif
+
+                    if (!isFin)
+                    {
+                        // Start of fragmentation
+                        c->fragmentOpcode = opcode;
+                        if (_onEvent)
+                            _onEvent(c, SERVER_EVENT_FRAGMENT_START, payload, payloadLen);
+                    }
+                    else
+                    {
+#if defined(NUSOCK_FULL_COMPLIANCE) || defined(NUSOCK_RFC_UTF8_STRICT)
+                        // If FIN check validation state is accept
+                        if (opcode == 0x1 && c->utf8State != NuUTF8::UTF8_ACCEPT)
+                        {
+                            if (_onEvent)
+                                _onEvent(c, SERVER_EVENT_ERROR, (const uint8_t *)"Truncated UTF-8", 15);
+                            c->client->stop();
+                            return;
+                        }
+                        c->utf8State = 0; // Reset for next message
+#endif
+
+                        // Normal complete message
+                        if (opcode == 0x1 && _onEvent)
+                            _onEvent(c, SERVER_EVENT_MESSAGE_TEXT, payload, payloadLen);
+                        else if (opcode == 0x2 && _onEvent)
+                            _onEvent(c, SERVER_EVENT_MESSAGE_BINARY, payload, payloadLen);
+                    }
+                }
+                else if (opcode == 0) // Continuation frame
+                {
+                    if (c->fragmentOpcode == 0)
+                    {
+                        c->client->stop();
+                        return; // Error: Orphan continuation
+                    }
+
+                    // Unmask payload
+                    if (isMasked)
+                    {
+                        uint8_t mask[4] = {c->rxBuffer[maskOffset], c->rxBuffer[maskOffset + 1], c->rxBuffer[maskOffset + 2], c->rxBuffer[maskOffset + 3]};
+                        uint8_t *payload = &c->rxBuffer[headerSize];
+                        for (size_t i = 0; i < payloadLen; i++)
+                            payload[i] ^= mask[i % 4];
+                    }
+                    uint8_t *payload = &c->rxBuffer[headerSize];
+
+#if defined(NUSOCK_FULL_COMPLIANCE) || defined(NUSOCK_RFC_UTF8_STRICT)
+                    if (c->fragmentOpcode == 0x1)
+                    {
+                        if (!NuUTF8::validate(c->utf8State, payload, payloadLen))
+                        {
+                            if (_onEvent)
+                                _onEvent(c, SERVER_EVENT_ERROR, (const uint8_t *)"Invalid UTF-8", 13);
+                            c->client->stop();
+                            return;
+                        }
+                    }
+#endif
+
+                    if (!isFin)
+                    {
+                        // Middle fragment
+                        if (_onEvent)
+                            _onEvent(c, SERVER_EVENT_FRAGMENT_CONT, payload, payloadLen);
+                    }
+                    else
+                    {
+#if defined(NUSOCK_FULL_COMPLIANCE) || defined(NUSOCK_RFC_UTF8_STRICT)
+                        if (c->fragmentOpcode == 0x1 && c->utf8State != NuUTF8::UTF8_ACCEPT)
+                        {
+                            if (_onEvent)
+                                _onEvent(c, SERVER_EVENT_ERROR, (const uint8_t *)"Truncated UTF-8", 15);
+                            c->client->stop();
+                            return;
+                        }
+                        c->utf8State = 0;
+#endif
+
+                        // End of fragmentation
+                        if (_onEvent)
+                            _onEvent(c, SERVER_EVENT_FRAGMENT_FIN, payload, payloadLen);
+                        c->fragmentOpcode = 0; // Reset state
+                    }
+                }
+#else
+                // Legacy behavior
                 if ((opcode == 0x1 || opcode == 0x2) && isMasked)
                 {
                     uint8_t mask[4] = {c->rxBuffer[maskOffset], c->rxBuffer[maskOffset + 1], c->rxBuffer[maskOffset + 2], c->rxBuffer[maskOffset + 3]};
                     uint8_t *payload = &c->rxBuffer[headerSize];
                     for (size_t i = 0; i < payloadLen; i++)
                         payload[i] ^= mask[i % 4];
+
+#if defined(NUSOCK_FULL_COMPLIANCE) || defined(NUSOCK_RFC_UTF8_STRICT)
+                    if (opcode == 0x1)
+                    {
+                        uint32_t tempState = 0;
+                        if (!NuUTF8::validate(tempState, payload, payloadLen) || tempState != NuUTF8::UTF8_ACCEPT)
+                        {
+                            if (_onEvent)
+                                _onEvent(c, SERVER_EVENT_ERROR, (const uint8_t *)"Invalid UTF-8", 13);
+                            c->client->stop();
+                            return;
+                        }
+                    }
+#endif
 
                     if (opcode == 0x1)
                     {
@@ -454,6 +870,9 @@ private:
                         c->last_event = SERVER_EVENT_MESSAGE_BINARY;
                     }
                 }
+#endif
+
+                // Consume frame (remove from buffer)
                 size_t total = headerSize + payloadLen;
                 size_t rem = c->rxLen - total;
                 if (rem > 0)
@@ -472,7 +891,7 @@ private:
 
 public:
     /**
-     * @brief Construct a new Nu Sock Server object.
+     * @brief Construct a new NuSock Server object.
      */
     NuSockServer() :
 #if defined(NUSOCK_USE_LWIP)
@@ -484,7 +903,7 @@ public:
     }
 
     /**
-     * @brief Destroy the Nu Sock Server object.
+     * @brief Destroy the NuSock Server object.
      * Stops the server and disconnects all clients.
      */
     ~NuSockServer() { stop(); }
@@ -566,7 +985,6 @@ public:
         {
             ServerType *srv = (ServerType *)s;
 
-// PLATFORM ADAPTIVE ACCEPT
 // Use accept() for UNO R4 (S3), NINA, ESP, RP2040.
 // Exclude SAMD MKR1000 specifically (WiFi101 doesn't support accept).
 #if (defined(ARDUINO_ARCH_SAMD) && !defined(ARDUINO_SAMD_MKR1000)) ||     \
@@ -591,7 +1009,7 @@ public:
             return nullptr;
         };
 
-        // DOUBLE BEGIN CHECK
+        // Double begin check
         // Only call begin() if server is not already running.
         // MKR1000 (WiFi101) does not support operator bool(), so we skip check there.
 #if defined(ARDUINO_AVR_UNO_WIFI_REV2) || defined(__AVR_ATmega4809__) || \
@@ -635,7 +1053,7 @@ public:
             }
             else
             {
-                // DUPLICATE CHECK
+                // Duplicate check
                 bool duplicate = false;
                 myLock.lock();
                 for (size_t i = 0; i < clients.size(); i++)
@@ -654,9 +1072,9 @@ public:
                 if (duplicate)
                 {
 
-                    // SAFE DUPLICATE CLEANUP
-                    // Ethernet (Teensy/Mega/STM32) and WiFiS3 (R4) clients MUST be deleted to avoid leaks.
-                    // WiFi101 (MKR1000) and WiFiNINA clients MUST NOT be deleted to avoid closing the socket.
+                    // Safe duplicate cleanup
+                    // Ethernet (Teensy/Mega/STM32) and WiFiS3 (R4) clients must be deleted to avoid leaks.
+                    // WiFi101 (MKR1000) and WiFiNINA clients must not be deleted to avoid closing the socket.
 
                     Client *rawWrapper = newClient->client;
 
@@ -742,7 +1160,7 @@ public:
             NuClient *c = clients[i];
             if (c->state != NuClient::STATE_CONNECTED)
                 continue;
-            buildFrame(c, 0x1, (const uint8_t *)msg, len);
+            buildFrame(c, 0x1, true, (const uint8_t *)msg, len);
 #ifdef NUSOCK_USE_LWIP
             tcpip_callback(static_flush_client, c);
 #endif
@@ -763,7 +1181,7 @@ public:
             NuClient *c = clients[i];
             if (c->state != NuClient::STATE_CONNECTED)
                 continue;
-            buildFrame(c, 0x2, data, len);
+            buildFrame(c, 0x2, true, data, len);
 #ifdef NUSOCK_USE_LWIP
             tcpip_callback(static_flush_client, c);
 #endif
@@ -784,7 +1202,7 @@ public:
         NuClient *c = clients[index];
         if (c->state == NuClient::STATE_CONNECTED)
         {
-            buildFrame(c, 0x1, (const uint8_t *)msg, strlen(msg));
+            buildFrame(c, 0x1, true, (const uint8_t *)msg, strlen(msg));
 #ifdef NUSOCK_USE_LWIP
             tcpip_callback(static_flush_client, c);
 #endif
@@ -806,7 +1224,7 @@ public:
         NuClient *c = clients[index];
         if (c->state == NuClient::STATE_CONNECTED)
         {
-            buildFrame(c, 0x2, data, len);
+            buildFrame(c, 0x2, true, data, len);
 #ifdef NUSOCK_USE_LWIP
             tcpip_callback(static_flush_client, c);
 #endif
@@ -829,7 +1247,7 @@ public:
             NuClient *c = clients[i];
             if (c->state == NuClient::STATE_CONNECTED && strcmp(c->id, targetId) == 0)
             {
-                buildFrame(c, 0x1, (const uint8_t *)msg, len);
+                buildFrame(c, 0x1, true, (const uint8_t *)msg, len);
 #ifdef NUSOCK_USE_LWIP
                 tcpip_callback(static_flush_client, c);
 #endif
@@ -852,11 +1270,168 @@ public:
             NuClient *c = clients[i];
             if (c->state == NuClient::STATE_CONNECTED && strcmp(c->id, targetId) == 0)
             {
-                buildFrame(c, 0x2, data, len);
+                buildFrame(c, 0x2, true, data, len);
 #ifdef NUSOCK_USE_LWIP
                 tcpip_callback(static_flush_client, c);
 #endif
             }
+        }
+        myLock.unlock();
+    }
+
+    /**
+     * @brief Start a fragmented message (FIN=0).
+     * @param index The client index.
+     * @param payload The first chunk of data.
+     * @param len Length of the data chunk.
+     * @param isBinary If true, starts a Binary message (Opcode 0x2). If false, starts Text (Opcode 0x1).
+     */
+    void sendFragmentStart(int index, const uint8_t *payload, size_t len, bool isBinary)
+    {
+        if (index >= (int)clients.size())
+            return;
+        myLock.lock();
+        NuClient *c = clients[index];
+        if (c->state == NuClient::STATE_CONNECTED)
+        {
+            // FIN = false, Opcode = 0x1 (Text) or 0x2 (Binary)
+            buildFrame(c, isBinary ? 0x2 : 0x1, false, payload, len);
+#ifdef NUSOCK_USE_LWIP
+            tcpip_callback(static_flush_client, c);
+#endif
+        }
+        myLock.unlock();
+    }
+
+    /**
+     * @brief Send a middle fragment (FIN=0, Opcode=0x0).
+     * @param index The client index.
+     * @param payload The data chunk.
+     * @param len Length of the data chunk.
+     */
+    void sendFragmentCont(int index, const uint8_t *payload, size_t len)
+    {
+        if (index >= (int)clients.size())
+            return;
+        myLock.lock();
+        NuClient *c = clients[index];
+        if (c->state == NuClient::STATE_CONNECTED)
+        {
+            // FIN = false, Opcode = 0x0 (Continuation)
+            buildFrame(c, 0x0, false, payload, len);
+#ifdef NUSOCK_USE_LWIP
+            tcpip_callback(static_flush_client, c);
+#endif
+        }
+        myLock.unlock();
+    }
+
+    /**
+     * @brief Finish a fragmented message (FIN=1, Opcode=0x0).
+     * @param index The client index.
+     * @param payload The last data chunk.
+     * @param len Length of the data chunk.
+     */
+    void sendFragmentFin(int index, const uint8_t *payload, size_t len)
+    {
+        if (index >= (int)clients.size())
+            return;
+        myLock.lock();
+        NuClient *c = clients[index];
+        if (c->state == NuClient::STATE_CONNECTED)
+        {
+            // FIN = true, Opcode = 0x0 (Continuation)
+            buildFrame(c, 0x0, true, payload, len);
+#ifdef NUSOCK_USE_LWIP
+            tcpip_callback(static_flush_client, c);
+#endif
+        }
+        myLock.unlock();
+    }
+
+    /**
+     * @brief Broadcast a Ping (0x9) to ALL connected clients.
+     * @param msg Optional payload string.
+     */
+    void sendPing(const char *msg = "")
+    {
+        myLock.lock();
+        size_t len = strlen(msg);
+        for (size_t i = 0; i < clients.size(); i++)
+        {
+            NuClient *c = clients[i];
+            if (c->state != NuClient::STATE_CONNECTED)
+                continue;
+
+            buildFrame(c, 0x9, true, (const uint8_t *)msg, len);
+#ifdef NUSOCK_USE_LWIP
+            tcpip_callback(static_flush_client, c);
+#endif
+        }
+        myLock.unlock();
+    }
+
+    /**
+     * @brief Send a Ping (0x9) to a specific client by index.
+     * @param index Client index.
+     * @param msg Optional payload string.
+     */
+    void sendPing(int index, const char *msg = "")
+    {
+        if (index >= (int)clients.size())
+            return;
+        myLock.lock();
+        NuClient *c = clients[index];
+        if (c->state == NuClient::STATE_CONNECTED)
+        {
+            buildFrame(c, 0x9, true, (const uint8_t *)msg, strlen(msg));
+#ifdef NUSOCK_USE_LWIP
+            tcpip_callback(static_flush_client, c);
+#endif
+        }
+        myLock.unlock();
+    }
+
+    /**
+     * @brief Initiate a graceful Close Handshake (RFC 6455).
+     * Sends a Close frame with a status code and reason, then waits for the client to reply.
+     * @param index Client index.
+     * @param code Status code (e.g., 1000 for Normal, 1001 for Going Away).
+     * @param reason Optional short string reason (max 123 bytes).
+     */
+    void close(int index, uint16_t code = 1000, const char *reason = "")
+    {
+        if (index >= (int)clients.size())
+            return;
+
+        myLock.lock();
+        NuClient *c = clients[index];
+
+        // Only initiate if currently connected
+        if (c->state == NuClient::STATE_CONNECTED)
+        {
+            uint8_t payload[128];
+            payload[0] = (uint8_t)((code >> 8) & 0xFF);
+            payload[1] = (uint8_t)(code & 0xFF);
+
+            size_t reasonLen = strlen(reason);
+            if (reasonLen > 123)
+                reasonLen = 123; // Limit to maintain max control frame size (125)
+
+            if (reasonLen > 0)
+            {
+                memcpy(&payload[2], reason, reasonLen);
+            }
+
+            // Send Close frame
+            buildFrame(c, 0x8, true, payload, 2 + reasonLen);
+
+#ifdef NUSOCK_USE_LWIP
+            tcpip_callback(static_flush_client, c);
+#endif
+
+            // Update state to wait for Echo
+            c->state = NuClient::STATE_CLOSING;
         }
         myLock.unlock();
     }

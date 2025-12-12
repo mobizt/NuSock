@@ -105,9 +105,15 @@ private:
             delete c;
     }
 
-    void buildFrame(NuClient *c, uint8_t opcode, const uint8_t *data, size_t len)
+    void buildFrame(NuClient *c, uint8_t opcode, bool isFin, const uint8_t *data, size_t len)
     {
-        c->appendTx(0x80 | opcode);
+        uint8_t firstByte = opcode & 0x0F;
+        if (isFin)
+        {
+            firstByte |= 0x80;
+        }
+        c->appendTx(firstByte);
+
         if (len <= 125)
         {
             c->appendTx((uint8_t)len);
@@ -132,7 +138,7 @@ private:
         if (ret > 0)
         {
 #if defined(NUSOCK_DEBUG)
-            NuSock::printLog("DBG ", "Read %d bytes from SSL connection\n");
+            NuSock::printLog("DBG ", "Read %d bytes from SSL connection\n", ret);
 #endif
 
             // Copy to RX buffer
@@ -227,8 +233,37 @@ private:
                 if (c->rxLen < 2)
                     return;
                 uint8_t opcode = c->rxBuffer[0] & 0x0F;
+                bool isFin = (c->rxBuffer[0] & 0x80);
                 uint8_t lenByte = c->rxBuffer[1] & 0x7F;
                 bool isMasked = (c->rxBuffer[1] & 0x80);
+
+#if defined(NUSOCK_FULL_COMPLIANCE) || defined(NUSOCK_RFC_STRICT_MASK_RSV)
+                // RSV check
+                if ((c->rxBuffer[0] & 0x70) != 0)
+                {
+#if defined(NUSOCK_DEBUG)
+                    NuSock::printLog("DBG ", "Error: RSV Bits set in incoming frame\n");
+#endif
+                    if (_onEvent)
+                        _onEvent(c, SERVER_EVENT_ERROR, (const uint8_t *)"RSV Error", 9);
+                    c->last_event = SERVER_EVENT_ERROR;
+                    removeClient(c, sc);
+                    return;
+                }
+                // Strict masking (server must receive masked)
+                if (!isMasked)
+                {
+#if defined(NUSOCK_DEBUG)
+                    NuSock::printLog("DBG ", "Error: Masking not set in incoming frame\n");
+#endif
+                    if (_onEvent)
+                        _onEvent(c, SERVER_EVENT_ERROR, (const uint8_t *)"Mask Error", 10);
+                    c->last_event = SERVER_EVENT_ERROR;
+                    removeClient(c, sc);
+                    return;
+                }
+#endif
+
                 size_t headerSize = 2;
                 size_t payloadLen = lenByte;
 
@@ -239,23 +274,201 @@ private:
                     payloadLen = (c->rxBuffer[2] << 8) | c->rxBuffer[3];
                     headerSize += 2;
                 }
+
                 if (isMasked)
                     headerSize += 4;
-                if (c->rxLen < headerSize + payloadLen)
+
+                size_t totalFrameSize = headerSize + payloadLen;
+                if (c->rxLen < totalFrameSize)
                     return;
 
                 size_t maskOffset = headerSize - 4;
 
-                if (opcode == 0x8)
+                // Control frames
+                if (opcode >= 0x8)
                 {
-                    if (_onEvent && c->last_event != SERVER_EVENT_CLIENT_DISCONNECTED)
-                        _onEvent(c, SERVER_EVENT_CLIENT_DISCONNECTED, nullptr, 0);
-                    c->last_event = SERVER_EVENT_CLIENT_DISCONNECTED;
-                    removeClient(c, sc);
-                    return;
+#if defined(NUSOCK_FULL_COMPLIANCE) || defined(NUSOCK_RFC_FRAGMENTATION) || defined(NUSOCK_RFC_STRICT_MASK_RSV)
+                    if (!isFin || payloadLen > 125)
+                    {
+                        if (_onEvent)
+                            _onEvent(c, SERVER_EVENT_ERROR, (const uint8_t *)"Control Err", 11);
+                        removeClient(c, sc);
+                        return;
+                    }
+#endif
+                    // Unmask control frame
+                    if (isMasked)
+                    {
+                        uint8_t mask[4] = {c->rxBuffer[maskOffset], c->rxBuffer[maskOffset + 1],
+                                           c->rxBuffer[maskOffset + 2], c->rxBuffer[maskOffset + 3]};
+                        uint8_t *ctrlPayload = &c->rxBuffer[headerSize];
+                        for (size_t i = 0; i < payloadLen; i++)
+                            ctrlPayload[i] ^= mask[i % 4];
+                    }
+                    uint8_t *ctrlPayload = &c->rxBuffer[headerSize];
+
+                    if (opcode == 0x8)
+                    {
+#if defined(NUSOCK_FULL_COMPLIANCE) || defined(NUSOCK_RFC_CLOSE_HANDSHAKE)
+                        if (payloadLen == 1)
+                        {
+                            removeClient(c, sc);
+                            return;
+                        }
+
+                        // We initiated close
+                        if (c->state == NuClient::STATE_CLOSING)
+                        {
+                            removeClient(c, sc);
+                            return;
+                        }
+
+                        // Client initiated close (Echo required)
+                        buildFrame(c, 0x8, true, ctrlPayload, payloadLen);
+                        if (c->txBuffer && c->txLen > 0)
+                        {
+                            esp_tls_conn_write(sc->tls, c->txBuffer, c->txLen);
+                            c->clearTx();
+                        }
+                        if (_onEvent && c->last_event != SERVER_EVENT_CLIENT_DISCONNECTED)
+                            _onEvent(c, SERVER_EVENT_CLIENT_DISCONNECTED, ctrlPayload, payloadLen);
+                        c->last_event = SERVER_EVENT_CLIENT_DISCONNECTED;
+                        removeClient(c, sc);
+                        return;
+#else
+                        if (_onEvent && c->last_event != SERVER_EVENT_CLIENT_DISCONNECTED)
+                            _onEvent(c, SERVER_EVENT_CLIENT_DISCONNECTED, nullptr, 0);
+                        c->last_event = SERVER_EVENT_CLIENT_DISCONNECTED;
+                        removeClient(c, sc);
+                        return;
+#endif
+                    }
+                    else if (opcode == 0x9)
+                    {
+                        buildFrame(c, 0xA, true, ctrlPayload, payloadLen);
+                    }
+
+                    size_t rem = c->rxLen - totalFrameSize;
+                    if (rem > 0)
+                        memmove(c->rxBuffer, c->rxBuffer + totalFrameSize, rem);
+                    c->rxLen -= totalFrameSize;
+                    continue;
                 }
 
-                if ((opcode == 0x1 || opcode == 0x2) && isMasked)
+                // Data frames
+#if defined(NUSOCK_FULL_COMPLIANCE) || defined(NUSOCK_RFC_FRAGMENTATION)
+                if (opcode > 0)
+                {
+                    if (c->fragmentOpcode != 0)
+                    {
+                        removeClient(c, sc);
+                        return;
+                    }
+                    // Unmask payload
+                    if (isMasked)
+                    {
+                        uint8_t mask[4] = {c->rxBuffer[maskOffset], c->rxBuffer[maskOffset + 1],
+                                           c->rxBuffer[maskOffset + 2], c->rxBuffer[maskOffset + 3]};
+                        uint8_t *payload = &c->rxBuffer[headerSize];
+                        for (size_t i = 0; i < payloadLen; i++)
+                            payload[i] ^= mask[i % 4];
+                    }
+                    uint8_t *payload = &c->rxBuffer[headerSize];
+
+#if defined(NUSOCK_FULL_COMPLIANCE) || defined(NUSOCK_RFC_UTF8_STRICT)
+                    if (opcode == 0x1) // Text
+                    {
+                        if (!NuUTF8::validate(c->utf8State, payload, payloadLen))
+                        {
+                            if (_onEvent)
+                                _onEvent(c, SERVER_EVENT_ERROR, (const uint8_t *)"UTF-8 Error", 11);
+                            removeClient(c, sc);
+                            return;
+                        }
+                    }
+#endif
+
+                    if (!isFin)
+                    {
+                        c->fragmentOpcode = opcode;
+                        if (_onEvent)
+                            _onEvent(c, SERVER_EVENT_FRAGMENT_START, payload, payloadLen);
+                    }
+                    else
+                    {
+#if defined(NUSOCK_FULL_COMPLIANCE) || defined(NUSOCK_RFC_UTF8_STRICT)
+                        if (opcode == 0x1 && c->utf8State != NuUTF8::UTF8_ACCEPT)
+                        {
+                            if (_onEvent)
+                                _onEvent(c, SERVER_EVENT_ERROR, (const uint8_t *)"UTF-8 Incomplete", 16);
+                            removeClient(c, sc);
+                            return;
+                        }
+                        c->utf8State = 0;
+#endif
+                        if (opcode == 0x1 && _onEvent)
+                            _onEvent(c, SERVER_EVENT_MESSAGE_TEXT, payload, payloadLen);
+                        else if (opcode == 0x2 && _onEvent)
+                            _onEvent(c, SERVER_EVENT_MESSAGE_BINARY, payload, payloadLen);
+                    }
+                }
+                else if (opcode == 0) // Continuation
+                {
+                    if (c->fragmentOpcode == 0)
+                    {
+                        removeClient(c, sc);
+                        return;
+                    }
+
+                    // Unmask payload
+                    if (isMasked)
+                    {
+                        uint8_t mask[4] = {c->rxBuffer[maskOffset], c->rxBuffer[maskOffset + 1],
+                                           c->rxBuffer[maskOffset + 2], c->rxBuffer[maskOffset + 3]};
+                        uint8_t *payload = &c->rxBuffer[headerSize];
+                        for (size_t i = 0; i < payloadLen; i++)
+                            payload[i] ^= mask[i % 4];
+                    }
+                    uint8_t *payload = &c->rxBuffer[headerSize];
+
+#if defined(NUSOCK_FULL_COMPLIANCE) || defined(NUSOCK_RFC_UTF8_STRICT)
+                    if (c->fragmentOpcode == 0x1) // Text continuation
+                    {
+                        if (!NuUTF8::validate(c->utf8State, payload, payloadLen))
+                        {
+                            if (_onEvent)
+                                _onEvent(c, SERVER_EVENT_ERROR, (const uint8_t *)"UTF-8 Error", 11);
+                            removeClient(c, sc);
+                            return;
+                        }
+                    }
+#endif
+
+                    if (!isFin)
+                    {
+                        if (_onEvent)
+                            _onEvent(c, SERVER_EVENT_FRAGMENT_CONT, payload, payloadLen);
+                    }
+                    else
+                    {
+#if defined(NUSOCK_FULL_COMPLIANCE) || defined(NUSOCK_RFC_UTF8_STRICT)
+                        if (c->fragmentOpcode == 0x1 && c->utf8State != NuUTF8::UTF8_ACCEPT)
+                        {
+                            if (_onEvent)
+                                _onEvent(c, SERVER_EVENT_ERROR, (const uint8_t *)"UTF-8 Incomplete", 16);
+                            removeClient(c, sc);
+                            return;
+                        }
+                        c->utf8State = 0;
+#endif
+                        if (_onEvent)
+                            _onEvent(c, SERVER_EVENT_FRAGMENT_FIN, payload, payloadLen);
+                        c->fragmentOpcode = 0;
+                    }
+                }
+#else
+                // Legacy
+                if (isMasked)
                 {
                     uint8_t mask[4] = {c->rxBuffer[maskOffset], c->rxBuffer[maskOffset + 1],
                                        c->rxBuffer[maskOffset + 2], c->rxBuffer[maskOffset + 3]};
@@ -270,7 +483,6 @@ private:
                             strncpy(c->id, (char *)payload, payloadLen);
                             c->id[payloadLen] = 0;
                         }
-
                         if (_onEvent)
                             _onEvent(c, SERVER_EVENT_MESSAGE_TEXT, payload, payloadLen);
                         c->last_event = SERVER_EVENT_MESSAGE_TEXT;
@@ -282,12 +494,13 @@ private:
                         c->last_event = SERVER_EVENT_MESSAGE_BINARY;
                     }
                 }
+#endif
 
-                size_t total = headerSize + payloadLen;
-                size_t rem = c->rxLen - total;
+                // Consume
+                size_t rem = c->rxLen - totalFrameSize;
                 if (rem > 0)
-                    memmove(c->rxBuffer, &c->rxBuffer[total], rem);
-                c->rxLen = rem;
+                    memmove(c->rxBuffer, c->rxBuffer + totalFrameSize, rem);
+                c->rxLen -= totalFrameSize;
             }
         }
 
@@ -298,12 +511,9 @@ private:
             if (sent > 0)
             {
                 if (sent == c->txLen)
-                {
                     c->clearTx();
-                }
                 else
                 {
-                    // Partial send
                     memmove(c->txBuffer, c->txBuffer + sent, c->txLen - sent);
                     c->txLen -= sent;
                 }
@@ -313,7 +523,7 @@ private:
 
 public:
     /**
-     * @brief Construct a new Nu Sock Server Secure object.
+     * @brief Construct a new NuSock Server Secure object.
      */
     NuSockServerSecure() : _serverSock(-1)
     {
@@ -321,7 +531,7 @@ public:
     }
 
     /**
-     * @brief Destroy the Nu Sock Server Secure object.
+     * @brief Destroy the NuSock Server Secure object.
      * Stops the server and frees resources.
      */
     ~NuSockServerSecure()
@@ -515,7 +725,7 @@ public:
 #endif
                     c->isSecure = true;
                     c->index = clients.size();
-                    c->state = NuClient::STATE_HANDSHAKE; // Skip SSL_HANDSHAKE, go straight to WS
+                    c->state = NuClient::STATE_HANDSHAKE; // Skip SSL handshake, go straight to WS
 
                     sc->nuClient = c;
 
@@ -569,7 +779,7 @@ public:
     void onEvent(NuServerSecureEventCallback cb) { _onEvent = cb; }
 
     /**
-     * @brief Broadcast a text message to ALL connected clients.
+     * @brief Broadcast a text message to aLL connected clients.
      * @param msg Null-terminated string to send.
      */
     void send(const char *msg)
@@ -580,13 +790,13 @@ public:
         {
             NuClient *c = clients[i];
             if (c->state == NuClient::STATE_CONNECTED)
-                buildFrame(c, 0x1, (const uint8_t *)msg, len);
+                buildFrame(c, 0x1, true, (const uint8_t *)msg, len);
         }
         myLock.unlock();
     }
 
     /**
-     * @brief Broadcast a binary message to ALL connected clients.
+     * @brief Broadcast a binary message to aLL connected clients.
      * @param data Pointer to the data buffer.
      * @param len Length of the data.
      */
@@ -597,7 +807,7 @@ public:
         {
             NuClient *c = clients[i];
             if (c->state == NuClient::STATE_CONNECTED)
-                buildFrame(c, 0x2, data, len);
+                buildFrame(c, 0x2, true, data, len);
         }
         myLock.unlock();
     }
@@ -614,7 +824,7 @@ public:
         myLock.lock();
         NuClient *c = clients[index];
         if (c->state == NuClient::STATE_CONNECTED)
-            buildFrame(c, 0x1, (const uint8_t *)msg, strlen(msg));
+            buildFrame(c, 0x1, true, (const uint8_t *)msg, strlen(msg));
         myLock.unlock();
     }
 
@@ -631,7 +841,133 @@ public:
         myLock.lock();
         NuClient *c = clients[index];
         if (c->state == NuClient::STATE_CONNECTED)
-            buildFrame(c, 0x2, data, len);
+            buildFrame(c, 0x2, true, data, len);
+        myLock.unlock();
+    }
+
+    /**
+     * @brief Start a fragmented message (FIN=0).
+     * @param index The client index.
+     * @param payload The first chunk of data.
+     * @param len Length of the data chunk.
+     * @param isBinary If true, starts a Binary message (Opcode 0x2). If false, starts Text (Opcode 0x1).
+     */
+    void sendFragmentStart(int index, const uint8_t *payload, size_t len, bool isBinary)
+    {
+        if (index >= clients.size())
+            return;
+        myLock.lock();
+        NuClient *c = clients[index];
+        if (c->state == NuClient::STATE_CONNECTED)
+        {
+            buildFrame(c, isBinary ? 0x2 : 0x1, false, payload, len);
+            // Secure server flushes immediately via write in the main loop or here if needed.
+            // In the original code, 'send' buffered data. We should ensure it gets written.
+            // However, NuSockServerSecure::loop() handles flushing txBuffer.
+        }
+        myLock.unlock();
+    }
+
+    /**
+     * @brief Send a middle fragment (FIN=0, Opcode=0x0).
+     * @param index The client index.
+     * @param payload The data chunk.
+     * @param len Length of the data chunk.
+     */
+    void sendFragmentCont(int index, const uint8_t *payload, size_t len)
+    {
+        if (index >= clients.size())
+            return;
+        myLock.lock();
+        NuClient *c = clients[index];
+        if (c->state == NuClient::STATE_CONNECTED)
+            buildFrame(c, 0x0, false, payload, len);
+        myLock.unlock();
+    }
+
+    /**
+     * @brief Finish a fragmented message (FIN=1, Opcode=0x0).
+     * @param index The client index.
+     * @param payload The last data chunk.
+     * @param len Length of the data chunk.
+     */
+    void sendFragmentFin(int index, const uint8_t *payload, size_t len)
+    {
+        if (index >= clients.size())
+            return;
+        myLock.lock();
+        NuClient *c = clients[index];
+        if (c->state == NuClient::STATE_CONNECTED)
+            buildFrame(c, 0x0, true, payload, len);
+        myLock.unlock();
+    }
+
+    /**
+     * @brief Broadcast a Ping (0x9) control frame to aLL connected clients.
+     */
+    void sendPing(const char *msg = "")
+    {
+        myLock.lock();
+        size_t len = strlen(msg);
+        for (size_t i = 0; i < clients.size(); i++)
+        {
+            NuClient *c = clients[i];
+            if (c->state == NuClient::STATE_CONNECTED)
+                buildFrame(c, 0x9, true, (const uint8_t *)msg, len);
+        }
+        myLock.unlock();
+    }
+
+    /**
+     * @brief Send a Ping (0x9) to a specific client.
+     */
+    void sendPing(int index, const char *msg = "")
+    {
+        if (index >= clients.size())
+            return;
+        myLock.lock();
+        NuClient *c = clients[index];
+        if (c->state == NuClient::STATE_CONNECTED)
+            buildFrame(c, 0x9, true, (const uint8_t *)msg, strlen(msg));
+        myLock.unlock();
+    }
+
+    /**
+     * @brief Initiate a graceful Close Handshake (RFC 6455).
+     * Sends a Close frame with a status code and reason, then waits for the client to reply.
+     * @param index Client index.
+     * @param code Status code (e.g., 1000 for Normal, 1001 for Going Away).
+     * @param reason Optional short string reason (max 123 bytes).
+     */
+    void close(int index, uint16_t code = 1000, const char *reason = "")
+    {
+        if (index >= (int)clients.size())
+            return;
+
+        myLock.lock();
+        NuClient *c = clients[index];
+
+        if (c->state == NuClient::STATE_CONNECTED)
+        {
+            uint8_t payload[128];
+            payload[0] = (uint8_t)((code >> 8) & 0xFF);
+            payload[1] = (uint8_t)(code & 0xFF);
+
+            size_t reasonLen = strlen(reason);
+            if (reasonLen > 123)
+                reasonLen = 123;
+
+            if (reasonLen > 0)
+            {
+                memcpy(&payload[2], reason, reasonLen);
+            }
+
+            buildFrame(c, 0x8, true, payload, 2 + reasonLen);
+
+            // Note: Data will be flushed in the next loop() cycle
+
+            c->state = NuClient::STATE_CLOSING;
+        }
         myLock.unlock();
     }
 
